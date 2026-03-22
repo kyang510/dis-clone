@@ -1,0 +1,16 @@
+{
+  "name": "dis-clone",
+  "version": "1.0.0",
+  "description": "discord clone",
+  "license": "ISC",
+  "author": "kevin yang",
+  "type": "commonjs",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "electron": "^41.0.2"
+  }
+}

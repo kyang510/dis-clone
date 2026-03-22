@@ -1,0 +1,71 @@
+body {
+    margin: 0;
+    background: rgb(34, 34, 34);
+    display: flex;
+    height: 100vh;
+}
+
+.directory {
+    width: 80px;
+    background-color: rgb(61, 61, 61);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 0;
+}
+
+.directory img {
+    width: 50px;
+    height: 50px;
+    border-radius: 20%;
+    margin-bottom: 10px;
+}
+
+.channel-list {
+    width: 140px;
+    justify-content: center;
+    background-color: rgb(156, 126, 126);
+    padding: 10px;
+}
+
+.channel-list h1 {
+    color: white;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 16px;
+}
+
+.chat-area {
+    flex: 1;
+    background-color: rgb(146, 137, 137);
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+}
+
+.chat-area h1 {
+    color: white;
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+.chat-area p {
+    color: white;
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+.input-area {
+    margin-top: auto;
+    display: flex;
+}
+
+.chat-area input {
+    width: 100%;
+    padding: 10px;
+    border-radius: 5px;
+    border: none;
+}
+
+.users-list {
+    width: 180px;
+    background-color: rgb(201, 199, 199);
+    padding: 10px;
+}
