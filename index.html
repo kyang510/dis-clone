@@ -5,6 +5,7 @@
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'"
+      id="info"
     />
     <meta
       http-equiv="X-Content-Security-Policy"
@@ -13,8 +14,8 @@
     <title>discord clone</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
+
   <body>
-      
     <div class="directory">
 
       <img class = logo src ="logo.png">
@@ -23,42 +24,38 @@
 
     <div class = "channel-list">
 
-      <div class = "channel">general</div>
-      <div class = "channel">memes</div>
-      <div class = "channel">gaming</div>
-      <div class = "channel">music</div>
+      <div class = "channel"># general</div>
+      <div class = "channel"># memes</div>
+      <div class = "channel"># gaming</div>
+      <div class = "channel"># music</div>
 
     </div>
 
     <div class = "chat-area">
 
-      <div class = "messages">
-        <div class = "message">
-          <span class = "username">user1:</span>
+      <div id="messageArea" class="messages">
+        <div class = "message-placeholder">
+          <span class = "username-placeholder">user1:</span>
           <span class = "text">Hello everyone!</span>
         </div>
-        <div class = "message">
-          <span class = "username">user2:</span>
+        <div class = "message-placeholder">
+          <span class = "username-placeholder">user2:</span>
           <span class = "text">Hi user1! How are you?</span>
         </div>
       </div>
 
-      <div class = "input-area">
-        <input type="text" id="message-input" placeholder="Message" />
-      </div>
-
+      <form id="form" class="input-area">
+        <input type="text" id="message" placeholder="Message" />
+      </form>
 
     </div>
 
       <div class = "users-list">
-        <div class = "user">user1</div>
-        <div class = "user">user2</div>
-        <div class = "user">user3</div>
+        <div class = "user-placeholder">user1</div>
+        <div class = "user-placeholder">user2</div>
+        <div class = "user-placeholder">user3</div>
 
       </div>
-  </body>
-  <footer>    
-    <p id="info"></p>
-  </footer>
-  <script src="./renderer.js"></script>
+  <script src="renderer.js"></script>  
+  </body>  
 </html>
