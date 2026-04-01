@@ -5,6 +5,7 @@ const { Server } = require('socket.io');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+const port = 3000;
 
 io.on('connection', (socket) => {
   socket.on('chat message', (data) => {
@@ -12,7 +13,7 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(3000, () => {
+server.listen(port, () => {
   console.log('Chat server running on http://localhost:3000');
       console.log(`Web server listening on port ${port}`);
 });
