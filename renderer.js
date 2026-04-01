@@ -7,32 +7,33 @@ let message;
 const form = document.getElementById('form');
 const messageInput = document.getElementById('message');
 const messageArea = document.getElementById('messageArea');
-
 form.addEventListener('submit', (e) => {
   e.preventDefault();
-  const message = messageInput.value; 
-  if (message.trim() === '') return;
-  console.log('Message sent:', message);
-  
-  // Create new message element
+
+  const message = messageInput.value.trim();
+  if (!message) return;
+
+  window.chatAPI.sendMessage({
+    message
+  });
+});
+
+window.chatAPI.onMessage((data) => {
   const messageDiv = document.createElement('div');
   messageDiv.className = 'message-placeholder';
-  
-  const username = 'Asian'; // Placeholder username
+  const username = 'asian'; // Placeholder username, replace with actual username logic ie account system
+
   const usernameSpan = document.createElement('span');
   usernameSpan.className = 'username-placeholder';
   usernameSpan.textContent = `${username}: `;
-  
   const textSpan = document.createElement('span');
   textSpan.className = 'text';
-  textSpan.textContent = message;
-  
+  textSpan.textContent = data.message;
   messageDiv.appendChild(usernameSpan);
   messageDiv.appendChild(textSpan);
-  
   messageArea.appendChild(messageDiv);
-  
   messageArea.scrollTop = messageArea.scrollHeight;
   
-  messageInput.value = '';
+  messageInput.value = ''; // Clear the input field after sending
+
 });

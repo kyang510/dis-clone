@@ -7,10 +7,20 @@
   "type": "commonjs",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+    "server": "node server.js",
+    "start": "electron . ",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "client1": "electron .",
+    "client2": "electron .",
+    "start-all": "concurrently \"npm run server\" \"npm run client1\" \"npm run client2\""
+},
   "devDependencies": {
+    "concurrently": "^9.2.1",
     "electron": "^41.0.2"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3"
   }
 }
