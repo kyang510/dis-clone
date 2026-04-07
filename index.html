@@ -22,13 +22,30 @@
 
     </div>
 
-    <div class = "channel-list">
+<div class = "channel-list">
+      <div class = "channel-header">
+        <h1>chats</h1>
+        <button id="add-channel-btn" class = "add-channels">+</button>
+      </div>
+      <div id="dynamic-channels">
+        <div class = "channel" data-channel-id="1"># general</div>
+        <div class = "channel" data-channel-id="2"># memes</div>
+        <div class = "channel" data-channel-id="3"># gaming</div>
+        <div class = "channel" data-channel-id="4"># music</div>
+      </div>
+    </div>
 
-      <div class = "channel"># general</div>
-      <div class = "channel"># memes</div>
-      <div class = "channel"># gaming</div>
-      <div class = "channel"># music</div>
+    <!-- Create Channel -->
+    <div id="channel-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <h2>Create Channel</h2>
+        <input type="text" id="channel-name-input" placeholder="# new-channel" maxlength="50" />
+        <div class="modal-buttons">
+          <button id="create-channel-cancel">Cancel</button>
+          <button id="create-channel-confirm">Create</button>
 
+        </div>
+      </div>
     </div>
 
     <div class = "chat-area">

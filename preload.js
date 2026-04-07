@@ -12,5 +12,7 @@ const socket = io('http://localhost:3000');
 
 contextBridge.exposeInMainWorld('chatAPI', {
   sendMessage: (data) => socket.emit('chat message', data),
-  onMessage: (callback) => socket.on('chat message', callback)
+  onMessage: (callback) => socket.on('chat message', callback),
+  sendChannel: (name, callback) => socket.emit('create-channel', name, callback),
+  onNewChannel: (callback) => socket.on('new-channel', callback)
 });
