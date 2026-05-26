@@ -12,14 +12,19 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "client1": "electron .",
     "client2": "electron .",
-    "start-all": "concurrently \"npm run server\" \"npm run client1\" \"npm run client2\""
-},
+    "start-all": "concurrently \"npm run server\" \"npm run client1\" \"npm run client2\"",
+    "start-server": "concurrently \"npm run server\" \"npm run client1\""
+  },
   "devDependencies": {
     "concurrently": "^9.2.1",
     "electron": "^41.0.2"
   },
   "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.6",
     "express": "^5.2.1",
+    "mysql2": "^3.22.3",
+    "pg": "^8.21.0",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3"
   }

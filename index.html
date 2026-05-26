@@ -4,13 +4,12 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:3000"
       id="info"
     />
     <meta
       http-equiv="X-Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'"
-    />
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:3000"    />
     <title>discord clone</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
@@ -73,6 +72,40 @@
         <div class = "user-placeholder">user3</div>
 
       </div>
-  <script src="renderer.js"></script>  
+
+
+  <div class="signup-box">
+    <h2>Create Account</h2>
+
+    <form id="signupForm">
+      <input
+        type="text"
+        id="username"
+        placeholder="Username"
+        required
+      />
+
+      <input
+        type="email"
+        id="email"
+        placeholder="Email"
+        required
+      />
+
+      <input
+        type="password"
+        id="password"
+        placeholder="Password"
+        required
+      />
+
+      <button type="submit">Sign Up</button>
+    </form>
+
+    <div id="message"></div>
+  </div>
+
+
+  <script src="renderer.js"></script>
   </body>  
 </html>

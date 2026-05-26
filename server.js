@@ -7,6 +7,90 @@ const server = http.createServer(app);
 const io = new Server(server);
 const port = 3000;
 
+const cors = require("cors");
+const bcrypt = require("bcrypt");
+const mysql = require('mysql2');
+
+app.use(cors());
+app.use(express.json());
+
+
+// MySQL database connection
+const db = mysql.createConnection({
+  host: "localhost",
+  user: "root",
+  database: "mywebsite",
+  password: "joshsucks",
+  port: 3306,
+});
+
+db.connect((err) => {
+  if (err) {
+    console.log("Database connection failed");
+    console.log(err);
+    return;
+  }
+
+  console.log("Connected to MySQL");
+});
+
+app.post("/signup", async (req, res) => {
+  const { username, email, password } = req.body;
+
+  const passwordHash = await bcrypt.hash(password, 10);
+
+  db.query(
+    "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)",
+    [username, email, passwordHash],
+    (err, result) => {
+      if (err) {
+        console.log("/signup INSERT error:", err);
+        return res.status(500).json({ message: "Signup failed", error: err.message });
+      }
+
+
+      res.json({ message: "Account created" });
+    }
+  );
+});
+
+app.post("/login", (req, res) => {
+  const { email, password } = req.body;
+
+  db.query(
+    "SELECT * FROM users WHERE email = ?",
+    [email],
+    async (err, results) => {
+      if (err) {
+        console.log(err);
+        return res.status(500).json({ message: "Login failed" });
+      }
+
+      if (results.length === 0) {
+        return res.status(400).json({ message: "Invalid login" });
+      }
+
+      const user = results[0];
+
+      const validPassword = await bcrypt.compare(
+        password,
+        user.password_hash
+      );
+
+      if (!validPassword) {
+        return res.status(400).json({ message: "Invalid login" });
+      }
+
+      res.json({
+        message: "Login successful",
+        userId: user.id,
+        username: user.username
+      });
+    }
+  );
+});
+
+// In-memory channel storage
 let channels = [
   {id: 1, name: 'general'},
   {id: 2, name: 'memes'},
