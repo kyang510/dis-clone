@@ -24,7 +24,9 @@
 <div class = "channel-list">
       <div class = "channel-header">
         <h1>chats</h1>
-        <button id="add-channel-btn" class = "add-channels">+</button>
+        <button id="add-channel-btn" class="add-channels">+</button>
+        <button id="login-btn" class="login-btn">=</button>
+        <button id="sign-up-btn" class="sigh-up">-</button>
       </div>
       <div id="dynamic-channels">
         <div class = "channel" data-channel-id="1"># general</div>
@@ -63,7 +65,6 @@
       <form id="form" class="input-area">
         <input type="text" id="message" placeholder="Message" />
       </form>
-
     </div>
 
       <div class = "users-list">
@@ -72,40 +73,45 @@
         <div class = "user-placeholder">user3</div>
 
       </div>
+      
+    <!-- Create Account Modal -->
+    <div id="signup-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <h2>Create Account</h2>
+        <form id="signupForm">
+          <input type = "text" id="username" placeholder="Username" required/>
+          <input type = "email" id="email" placeholder="Email" required/>
+          <input type ="password" id="password" placeholder="Password" required/>
 
+          <div class="modal-buttons">
+            <button id = "signup-cancel" type="button">Cancel</button>
+            <button id = "sign-up" type="submit">Sign up</button>
+          </div>
+        </form>
 
-  <div class="signup-box">
-    <h2>Create Account</h2>
+        <div id="signup-message"></div>
+      </div>
+    </div>
 
-    <form id="signupForm">
-      <input
-        type="text"
-        id="username"
-        placeholder="Username"
-        required
-      />
+    <!-- Login Modal -->
+    <div id="login-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <h2>Login</h2>
 
-      <input
-        type="email"
-        id="email"
-        placeholder="Email"
-        required
-      />
+        <form id="loginForm">
+          <input type="email" id="login-email" placeholder="Email" required />
+          <input type="password" id="login-password" placeholder="Password" required />
 
-      <input
-        type="password"
-        id="password"
-        placeholder="Password"
-        required
-      />
+          <div class="modal-buttons">
+            <button id="login-cancel" type="button">Cancel</button>
+            <button id="login-submit" type="submit">Login</button>
+          </div>
+        </form>
 
-      <button type="submit">Sign Up</button>
-    </form>
+        <div id="login-message"></div>
+      </div>
+    </div>
 
-    <div id="message"></div>
-  </div>
-
-
-  <script src="renderer.js"></script>
-  </body>  
+    <script src="renderer.js"></script>
+  </body>
 </html>

@@ -76,7 +76,7 @@ body {
     overflow-y: auto;
 }
 
-.add-channels {
+.add-channels, .sign-up {
     pointer-events: auto;
     display: flex;
     justify-content: right;
@@ -87,7 +87,7 @@ body {
     cursor: pointer;
 }
 
-.add-channels:hover {
+.add-channels:hover, .sign-up:hover {
     display: flex ;
     background-color: rgb(255, 255, 255);
     color: rgb(34, 34, 34);
@@ -108,7 +108,7 @@ h1 {
     align-items: center;
 }
 /* create channels pop out*/
-.modal {
+.modal,.modal-sin {
   position: fixed;
   top: 0;
   left: 0;
@@ -121,7 +121,7 @@ h1 {
   z-index: 1000;
 }
 
-.modal-content {
+.modal-content, .modal-sin-content {
   background: rgb(54, 57, 63);
   padding: 20px;
   border-radius: 8px;
@@ -130,12 +130,12 @@ h1 {
   color: white;
 }
 
-.modal-content h2 {
+.modal-content h2, .modal-sin-content h2 {
   margin: 0 0 15px 0;
   font-family: Arial, Helvetica, sans-serif;
 }
 
-.modal-content input {
+.modal-content input, .modal-sin-content input {
   width: 80%;
   padding: 10px;
   border-radius: 5px;
@@ -145,13 +145,13 @@ h1 {
   color: white;
 }
 
-.modal-buttons {
+.modal-buttons, .modal-sin-buttons {
   display: flex;
   gap: 10px;
   justify-content: center;
 }
 
-.modal-buttons button {
+.modal-buttons button, .modal-sin-buttons button {
   flex: 1;
   padding: 8px 16px;
   border: none;
@@ -181,4 +181,50 @@ h1 {
 .channel.active {
   background-color: #a3a3a3;
   border-radius: 4px;
+}
+
+#sign-up {
+  background: #575757;
+  color: white;
+}
+
+#sign-up:hover {
+  background: #7c7c7c;
+}
+
+#signup-cancel {
+  background: #575757;
+  color: white;
+}
+
+#signup-cancel:hover {
+  background: #7c7c7c;
+}
+
+h2 {
+    color: white;
+    font-family: Arial, Helvetica, sans-serif;
+    text-align: center;
+}
+
+#sign-up-btn {
+    pointer-events: auto;
+    display: flex;
+    justify-content: right;
+    background-color: transparent;
+    color: white;
+    border: none;
+    border-radius: 20px;
+    cursor: pointer;
+}
+
+#login-btn {
+    pointer-events: auto;
+    display: flex;
+    justify-content: right;
+    background-color: transparent;
+    color: white;
+    border: none;
+    border-radius: 20px;
+    cursor: pointer;
 }
