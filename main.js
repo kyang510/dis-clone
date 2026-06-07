@@ -1,5 +1,22 @@
-const { app, BrowserWindow } = require('electron/main')
+const { app, BrowserWindow, session } = require('electron')
 const path = require('node:path')
+
+function isLocalAppWindow(webContents) {
+  const currentUrl = webContents && webContents.getURL()
+  return currentUrl && currentUrl.startsWith('file://')
+}
+
+function configurePermissions() {
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const isAudioRequest = permission === 'media' && details.mediaTypes && details.mediaTypes.includes('audio')
+    callback(isLocalAppWindow(webContents) && isAudioRequest)
+  })
+
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+    return isLocalAppWindow(webContents) && permission === 'media'
+  })
+}
+
 const createWindow = () => {
   const win = new BrowserWindow({
     minWidth: 1000,
@@ -16,6 +33,8 @@ const createWindow = () => {
 }
 
 app.whenReady().then(() => {
+
+    configurePermissions()
 
     createWindow()
 

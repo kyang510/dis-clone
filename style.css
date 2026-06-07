@@ -76,7 +76,7 @@ body {
     overflow-y: auto;
 }
 
-.add-channels, .sign-up {
+.add-channels, .sign-up, .add-voice-channel {
     pointer-events: auto;
     display: flex;
     justify-content: right;
@@ -87,7 +87,7 @@ body {
     cursor: pointer;
 }
 
-.add-channels:hover, .sign-up:hover {
+.add-channels:hover, .sign-up:hover, .add-voice-channel:hover {
     display: flex ;
     background-color: rgb(255, 255, 255);
     color: rgb(34, 34, 34);
@@ -165,22 +165,140 @@ h1 {
   color: white;
 }
 
-#create-channel-confirm:hover {
+#create-channel-confirm:hover, #create-voice-channel-confirm:hover {
   background: #7c7c7c;
 }
 
-#create-channel-cancel {
+#create-channel-cancel, #create-voice-channel-cancel, #create-voice-channel-confirm {
   background: #575757;
   color: white;
 }
 
-#create-channel-cancel:hover {
+#create-channel-cancel:hover, #create-voice-channel-cancel:hover {
   background: #7c7c7c;
 }
 /* active channel*/
 .channel.active {
   background-color: #a3a3a3;
   border-radius: 4px;
+}
+
+.voice-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  margin-top: 16px;
+  padding-top: 12px;
+}
+
+.voice-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.voice-header h2 {
+  color: white;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  margin: 0;
+  text-align: left;
+}
+
+.channel, .voice-channel {
+  color: white;
+  cursor: pointer;
+  font-family: Arial, Helvetica, sans-serif;
+  padding: 6px;
+  word-break: break-word;
+}
+
+.voice-channel.active {
+  background-color: #a3a3a3;
+  border-radius: 4px;
+}
+
+.voice-channel-top {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.voice-channel-name {
+  min-width: 0;
+}
+
+.voice-channel-count {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.voice-members {
+  margin-top: 4px;
+  padding-left: 12px;
+}
+
+.voice-member {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.voice-member.self {
+  color: white;
+  font-weight: bold;
+}
+
+.voice-control-panel {
+  align-items: center;
+  background: rgb(54, 57, 63);
+  border-radius: 6px;
+  color: white;
+  display: flex;
+  font-family: Arial, Helvetica, sans-serif;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding: 10px;
+}
+
+.voice-status-label {
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.voice-status-channel {
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.voice-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.voice-actions button {
+  background: #575757;
+  border: none;
+  border-radius: 5px;
+  color: white;
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+.voice-actions button:hover:not(:disabled) {
+  background: #7c7c7c;
+}
+
+.voice-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+#remote-audio-container {
+  display: none;
 }
 
 #sign-up {

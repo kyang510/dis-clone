@@ -4,12 +4,12 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:3000"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:3000 ws://localhost:3000; media-src 'self' blob:"
       id="info"
     />
     <meta
       http-equiv="X-Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:3000"    />
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:3000 ws://localhost:3000; media-src 'self' blob:"    />
     <title>discord clone</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
@@ -34,6 +34,13 @@
         <div class = "channel" data-channel-id="3"># gaming</div>
         <div class = "channel" data-channel-id="4"># music</div>
       </div>
+      <div class="voice-section">
+        <div class="voice-header">
+          <h2>voice channels</h2>
+          <button id="add-voice-channel-btn" class="add-voice-channel">+</button>
+        </div>
+        <div id="dynamic-voice-channels"></div>
+      </div>
     </div>
 
     <!-- Create Channel -->
@@ -44,6 +51,19 @@
         <div class="modal-buttons">
           <button id="create-channel-cancel">Cancel</button>
           <button id="create-channel-confirm">Create</button>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Create Voice Channel -->
+    <div id="voice-channel-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <h2>Create Voice Channel</h2>
+        <input type="text" id="voice-channel-name-input" placeholder="New Voice Chat" maxlength="50" />
+        <div class="modal-buttons">
+          <button id="create-voice-channel-cancel">Cancel</button>
+          <button id="create-voice-channel-confirm">Create</button>
 
         </div>
       </div>
@@ -61,6 +81,18 @@
           <span class = "text">Hi user1! How are you?</span>
         </div>
       </div>
+//voice control panel
+      <div id="voice-control-panel" class="voice-control-panel">
+        <div>
+          <div class="voice-status-label">Voice disconnected</div>
+          <div id="voice-status-channel" class="voice-status-channel">Not connected</div>
+        </div>
+        <div class="voice-actions">
+          <button id="mute-voice-btn" type="button" disabled>Mute</button>
+          <button id="deafen-voice-btn" type="button" disabled>Deafen</button>
+          <button id="leave-voice-btn" type="button" disabled>Leave</button>
+        </div>
+      </div>
 
       <form id="form" class="input-area">
         <input type="text" id="message" placeholder="Message" />
@@ -73,6 +105,8 @@
         <div class = "user-placeholder">user3</div>
 
       </div>
+
+    <div id="remote-audio-container" aria-hidden="true"></div>
       
     <!-- Create Account Modal -->
     <div id="signup-modal" class="modal" style="display: none;">
