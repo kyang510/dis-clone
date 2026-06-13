@@ -251,16 +251,22 @@ h1 {
 }
 
 .voice-control-panel {
-  align-items: center;
+  align-items: stretch;
   background: rgb(54, 57, 63);
   border-radius: 6px;
+  bottom: 10px;
+  box-sizing: border-box;
   color: white;
   display: flex;
+  flex-direction: column;
   font-family: Arial, Helvetica, sans-serif;
-  gap: 12px;
-  justify-content: space-between;
-  margin-top: 10px;
+  gap: 8px;
+  justify-content: flex-start;
   padding: 10px;
+  position: fixed;
+  left: 10px;
+  width: min(220px, calc(100vw - 20px));
+  z-index: 900;
 }
 
 .voice-status-label {
@@ -285,6 +291,7 @@ h1 {
   border-radius: 5px;
   color: white;
   cursor: pointer;
+  flex: 1;
   padding: 8px 12px;
 }
 
