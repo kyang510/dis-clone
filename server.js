@@ -19,7 +19,7 @@ app.use(cors());
 app.use(express.json());
 
 
-// MySQL database connection
+// MySQL database connection //remove/change later when deploying (if i do make it into a production app)
 const db = mysql.createConnection({
   host: "localhost",
   user: "root",
@@ -54,6 +54,20 @@ app.post("/signup", async (req, res) => {
 
 
       res.json({ message: "Account created" });
+    }
+  );
+});
+
+app.get("/users", (req, res) => {
+  db.query(
+    "SELECT id, username FROM users ORDER BY username ASC",
+    (err, results) => {
+      if (err) {
+        console.log("/users SELECT error:", err);
+        return res.status(500).json({ message: "Could not load users" });
+      }
+
+      res.json({ users: results });
     }
   );
 });

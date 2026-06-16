@@ -1,13 +1,27 @@
+:root {
+    --directory-bg: #3d3d3d;
+    --channel-list-bg: #9c7e7e;
+    --chat-bg: #928989;
+    --users-bg: #c9c7c7;
+    --surface-bg: #36393f;
+    --input-bg: #222222;
+    --button-bg: #575757;
+    --button-hover-bg: #7c7c7c;
+    --active-bg: #a3a3a3;
+    --menu-bg: #18191c;
+    --overlay-bg: #000000;
+}
+
 body {
     margin: 0;
-    background: rgb(34, 34, 34);
+    background: #222222;
     display: flex;
     height: 100vh;
 }
 
 .directory {
     width: 80px;
-    background-color: rgb(61, 61, 61);
+    background-color: var(--directory-bg);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -26,7 +40,7 @@ body {
 .channel-list {
     width: 140px;
     justify-content: center;
-    background-color: rgb(156, 126, 126);
+    background-color: var(--channel-list-bg);
     padding: 10px;
     overflow-y: auto;
 }
@@ -40,7 +54,7 @@ body {
 
 .chat-area {
     flex: 1;
-    background-color: rgb(146, 137, 137);
+    background-color: var(--chat-bg);
     display: flex;
     flex-direction: column;
     padding: 10px;
@@ -71,9 +85,17 @@ body {
 
 .users-list {
     width: 180px;
-    background-color: rgb(201, 199, 199);
+    background-color: var(--users-bg);
     padding: 10px;
     overflow-y: auto;
+}
+
+.database-user {
+    color: rgb(45, 45, 45);
+    margin-top: 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .add-channels, .sign-up, .add-voice-channel {
@@ -89,8 +111,8 @@ body {
 
 .add-channels:hover, .sign-up:hover, .add-voice-channel:hover {
     display: flex ;
-    background-color: rgb(255, 255, 255);
-    color: rgb(34, 34, 34);
+    background-color: var(--button-hover-bg);
+    color: var(--app-bg);
     transition: background-color 0.3s, color 0.3s;
 }
 
@@ -115,6 +137,7 @@ h1 {
   width: 100%;
   height: 100%;
   background-color: rgba(0, 0, 0, 0.5);
+  background-color: color-mix(in srgb, var(--overlay-bg) 50%, transparent);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -122,7 +145,7 @@ h1 {
 }
 
 .modal-content, .modal-sin-content {
-  background: rgb(54, 57, 63);
+  background: var(--surface-bg);
   padding: 20px;
   border-radius: 8px;
   width: 300px;
@@ -141,7 +164,7 @@ h1 {
   border-radius: 5px;
   border: 1px solid #ccc;
   margin-bottom: 15px;
-  background: rgb(34, 34, 34);
+  background: var(--input-bg);
   color: white;
 }
 
@@ -161,25 +184,25 @@ h1 {
 }
 
 #create-channel-confirm {
-  background: #575757;
+  background: var(--button-bg);
   color: white;
 }
 
 #create-channel-confirm:hover, #create-voice-channel-confirm:hover {
-  background: #7c7c7c;
+  background: var(--button-hover-bg);
 }
 
 #create-channel-cancel, #create-voice-channel-cancel, #create-voice-channel-confirm {
-  background: #575757;
+  background: var(--button-bg);
   color: white;
 }
 
 #create-channel-cancel:hover, #create-voice-channel-cancel:hover {
-  background: #7c7c7c;
+  background: var(--button-hover-bg);
 }
 /* active channel*/
 .channel.active {
-  background-color: #a3a3a3;
+  background-color: var(--active-bg);
   border-radius: 4px;
 }
 
@@ -213,7 +236,7 @@ h1 {
 }
 
 .voice-channel.active {
-  background-color: #a3a3a3;
+  background-color: var(--active-bg);
   border-radius: 4px;
 }
 
@@ -250,9 +273,33 @@ h1 {
   font-weight: bold;
 }
 
+.voice-member-name {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  box-sizing: border-box;
+  display: block;
+  margin: -2px -4px;
+  overflow: hidden;
+  padding: 2px 4px;
+  text-overflow: ellipsis;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+  white-space: nowrap;
+}
+
+.voice-member-name.can-open-menu {
+  cursor: context-menu;
+}
+
+.voice-member-name.speaking {
+  background: rgba(35, 165, 90, 0.22);
+  border-color: #23a55a;
+  box-shadow: 0 0 0 1px rgba(35, 165, 90, 0.55), 0 0 10px rgba(35, 165, 90, 0.45);
+  color: white;
+}
+
 .voice-control-panel {
   align-items: stretch;
-  background: rgb(54, 57, 63);
+  background: var(--surface-bg);
   border-radius: 6px;
   bottom: 10px;
   box-sizing: border-box;
@@ -282,21 +329,22 @@ h1 {
 
 .voice-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .voice-actions button {
-  background: #575757;
+  background: var(--button-bg);
   border: none;
   border-radius: 5px;
   color: white;
   cursor: pointer;
-  flex: 1;
+  flex: 1 1 calc(50% - 4px);
   padding: 8px 12px;
 }
 
 .voice-actions button:hover:not(:disabled) {
-  background: #7c7c7c;
+  background: var(--button-hover-bg);
 }
 
 .voice-actions button:disabled {
@@ -308,22 +356,185 @@ h1 {
   display: none;
 }
 
+.remote-volume-menu {
+  background: var(--menu-bg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-sizing: border-box;
+  color: white;
+  font-family: Arial, Helvetica, sans-serif;
+  padding: 10px;
+  position: fixed;
+  width: 220px;
+  z-index: 1100;
+}
+
+.remote-volume-menu[hidden] {
+  display: none;
+}
+
+.remote-volume-menu-name {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  font-weight: bold;
+  margin-bottom: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-volume-row {
+  align-items: center;
+  color: rgba(255, 255, 255, 0.75);
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+#remote-volume-slider {
+  width: 100%;
+}
+
+.voice-settings-content {
+  max-height: 85vh;
+  overflow-y: auto;
+  text-align: left;
+  width: 400px;
+}
+
+.voice-settings-content h2 {
+  text-align: center;
+}
+
+.voice-settings-content h3 {
+  color: white;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  margin: 16px 0 12px;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  font-family: Arial, Helvetica, sans-serif;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.settings-field span {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+}
+
+.settings-field select {
+  background: var(--input-bg);
+  border: 1px solid #777;
+  border-radius: 5px;
+  color: white;
+  padding: 9px;
+  width: 100%;
+}
+
+.settings-field select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.settings-message {
+  color: rgba(255, 255, 255, 0.75);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 12px;
+  margin: -4px 0 14px;
+}
+
+.appearance-settings {
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  margin-top: 16px;
+  padding-top: 2px;
+}
+
+.appearance-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.appearance-control {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(98px, 1fr) 44px 88px;
+}
+
+.appearance-control label {
+  color: rgba(255, 255, 255, 0.85);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 13px;
+}
+
+.modal-content input.appearance-color {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  height: 34px;
+  margin: 0;
+  padding: 0;
+  width: 44px;
+}
+
+.modal-content input.appearance-hex {
+  background: var(--input-bg);
+  border: 1px solid #777;
+  border-radius: 5px;
+  box-sizing: border-box;
+  color: white;
+  margin: 0;
+  padding: 8px;
+  text-transform: uppercase;
+  width: 88px;
+}
+
+.modal-content input.appearance-hex.invalid {
+  border-color: #ed4245;
+}
+
+#voice-settings-refresh, #voice-settings-close, #appearance-reset {
+  background: var(--button-bg);
+  color: white;
+}
+
+#voice-settings-refresh:hover, #voice-settings-close:hover, #appearance-reset:hover {
+  background: var(--button-hover-bg);
+}
+
+#appearance-reset {
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 14px;
+  margin: 14px 0 16px;
+  padding: 8px 12px;
+  width: 100%;
+}
+
 #sign-up {
-  background: #575757;
+  background: var(--button-bg);
   color: white;
 }
 
 #sign-up:hover {
-  background: #7c7c7c;
+  background: var(--button-hover-bg);
 }
 
 #signup-cancel {
-  background: #575757;
+  background: var(--button-bg);
   color: white;
 }
 
 #signup-cancel:hover {
-  background: #7c7c7c;
+  background: var(--button-hover-bg);
 }
 
 h2 {

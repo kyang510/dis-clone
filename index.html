@@ -7,9 +7,6 @@
       content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:3000 ws://localhost:3000; media-src 'self' blob:"
       id="info"
     />
-    <meta
-      http-equiv="X-Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:3000 ws://localhost:3000; media-src 'self' blob:"    />
     <title>discord clone</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
@@ -97,17 +94,69 @@
           <button id="mute-voice-btn" type="button" disabled>Mute</button>
           <button id="deafen-voice-btn" type="button" disabled>Deafen</button>
           <button id="leave-voice-btn" type="button" disabled>Leave</button>
+          <button id="voice-settings-btn" type="button">Settings</button>
         </div>
       </div>
+
+    <!-- Voice Settings -->
+    <div id="voice-settings-modal" class="modal" style="display: none;">
+      <div class="modal-content voice-settings-content">
+        <h2>Settings</h2>
+
+        <h3>Voice</h3>
+
+        <label class="settings-field" for="mic-device-select">
+          <span>Microphone</span>
+          <select id="mic-device-select"></select>
+        </label>
+
+        <label class="settings-field" for="audio-output-select">
+          <span>Speaker</span>
+          <select id="audio-output-select"></select>
+        </label>
+
+        <div id="audio-output-warning" class="settings-message" hidden>
+          Speaker selection is unavailable.
+        </div>
+
+        <div class="appearance-settings">
+          <h3>Appearance</h3>
+          <div id="appearance-controls" class="appearance-controls"></div>
+          <button id="appearance-reset" type="button">Reset Colors</button>
+        </div>
+
+        <div class="modal-buttons">
+          <button id="voice-settings-refresh" type="button">Refresh</button>
+          <button id="voice-settings-close" type="button">Close</button>
+        </div>
+      </div>
+    </div>
 
       <div class = "users-list">
         <div class = "user-placeholder">user1</div>
         <div class = "user-placeholder">user2</div>
         <div class = "user-placeholder">user3</div>
+        <div id="database-users"></div>
 
-      </div>
+    </div>
 
     <div id="remote-audio-container" aria-hidden="true"></div>
+
+    <div id="remote-volume-menu" class="remote-volume-menu" hidden>
+      <div id="remote-volume-menu-name" class="remote-volume-menu-name"></div>
+      <div class="remote-volume-row">
+        <span>Volume</span>
+        <span id="remote-volume-value">100%</span>
+      </div>
+      <input
+        id="remote-volume-slider"
+        type="range"
+        min="0"
+        max="200"
+        step="1"
+        value="100"
+      />
+    </div>
       
     <!-- Create Account Modal -->
     <div id="signup-modal" class="modal" style="display: none;">
