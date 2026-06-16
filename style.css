@@ -1,4 +1,5 @@
 :root {
+    --app-bg: #222222; /* app background */
     --directory-bg: #3d3d3d;
     --channel-list-bg: #9c7e7e;
     --chat-bg: #928989;
@@ -14,7 +15,7 @@
 
 body {
     margin: 0;
-    background: #222222;
+    background: var(--app-bg);
     display: flex;
     height: 100vh;
 }
@@ -69,6 +70,41 @@ body {
 .chat-area p {
     color: white;
     font-family: Arial, Helvetica, sans-serif;
+}
+
+.messages {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.message-placeholder {
+    color: white;
+    font-family: Arial, Helvetica, sans-serif;
+    margin-bottom: 12px;
+}
+
+.message-header {
+    align-items: baseline;
+    display: flex;
+    gap: 8px;
+    min-width: 0;
+}
+
+.username-placeholder {
+    font-weight: bold;
+    overflow-wrap: anywhere;
+}
+
+.message-time {
+    color: rgba(255, 255, 255, 0.68);
+    flex: 0 0 auto;
+    font-size: 11px;
+}
+
+.message-placeholder .text {
+    display: block;
+    margin-top: 2px;
+    overflow-wrap: anywhere;
 }
 
 .input-area {
@@ -554,6 +590,11 @@ h2 {
     cursor: pointer;
 }
 
+#sign-up-btn:hover {
+    background-color: var(--button-hover-bg);
+    color: var(--app-bg);
+}
+
 #login-btn {
     pointer-events: auto;
     display: flex;
@@ -564,3 +605,10 @@ h2 {
     border-radius: 20px;
     cursor: pointer;
 }
+
+#login-btn:hover {
+    background-color: var(--button-hover-bg);
+    color: var(--app-bg);
+}
+
+

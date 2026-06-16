@@ -11,6 +11,12 @@ const databaseUsersContainer = document.getElementById('database-users');
 let currentChannelId = 1;
 let currentUserId = null;
 let currentUsername = 'anonymous';
+const DEFAULT_CHANNEL_ID = 1;
+const MAX_VISIBLE_MESSAGES = 100;
+let messageLoadRequestId = 0;
+let isLoadingMessages = false;
+let queuedLiveMessages = [];
+let renderedMessageIds = new Set();
 
 function renderDatabaseUsers(users) {
   databaseUsersContainer.innerHTML = '';
@@ -26,15 +32,47 @@ function renderDatabaseUsers(users) {
 
 async function loadDatabaseUsers() {
   try {
-    const response = await fetch('http://localhost:3000/users');
-    const data = await response.json();
+    const data = await window.chatAPI.getUsers();
 
-    if (response.ok) {
+    if (data.success) {
       renderDatabaseUsers(data.users || []);
     }
   } catch (err) {
     console.log(err);
   }
+}
+
+function updateAuthControls() {
+  const loginButton = document.getElementById('login-btn');
+  const signupButton = document.getElementById('sign-up-btn');
+
+  if (loginButton) {
+    loginButton.textContent = currentUserId ? 'out' : '=';
+    loginButton.title = currentUserId ? 'Log out' : 'Log in';
+  }
+
+  if (signupButton) {
+    signupButton.hidden = Boolean(currentUserId);
+  }
+}
+
+function applyAuthenticatedUser(user) {
+  currentUserId = user && user.id;
+  currentUsername = (user && user.username) || 'anonymous';
+  updateAuthControls();
+  renderVoiceChannels();
+  loadDatabaseUsers();
+  loadChannelMessages(currentChannelId);
+}
+
+function clearAuthenticatedUser() {
+  currentUserId = null;
+  currentUsername = 'anonymous';
+  messageArea.innerHTML = '';
+  databaseUsersContainer.innerHTML = '';
+  resetRenderedMessageIds();
+  updateAuthControls();
+  renderVoiceChannels();
 }
 
 // Create Channel modal
@@ -71,14 +109,161 @@ confirmBtn.onclick = () => {
   });
 };
 
+function parseChannelId(channelId, fallback = DEFAULT_CHANNEL_ID) {
+  const parsed = Number.parseInt(channelId, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getMessageChannelId(data) {
+  return parseChannelId(data && data.channelId, DEFAULT_CHANNEL_ID);
+}
+
+function formatMessageTime(value) {
+  const date = value ? new Date(value) : new Date();
+
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfMessageDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const daysAgo = Math.round((startOfToday - startOfMessageDay) / 86400000);
+  const time = new Intl.DateTimeFormat([], {
+    hour: 'numeric',
+    minute: '2-digit'
+  }).format(date);
+
+  if (daysAgo === 0) {
+    return time;
+  }
+
+  if (daysAgo === 1) {
+    return `Yesterday ${time}`;
+  }
+
+  const dateParts = {
+    month: 'short',
+    day: 'numeric'
+  };
+
+  if (date.getFullYear() !== now.getFullYear()) {
+    dateParts.year = 'numeric';
+  }
+
+  return `${new Intl.DateTimeFormat([], dateParts).format(date)}, ${time}`;
+}
+
+function resetRenderedMessageIds() {
+  renderedMessageIds = new Set();
+}
+
+function trimVisibleMessages() {
+  while (messageArea.children.length > MAX_VISIBLE_MESSAGES) {
+    const firstMessage = messageArea.firstElementChild;
+    const messageId = firstMessage && firstMessage.dataset.messageId;
+
+    if (messageId) {
+      renderedMessageIds.delete(messageId);
+    }
+
+    firstMessage.remove();
+  }
+}
+
+function appendChatMessage(data) {
+  const messageText = String((data && (data.message || data.body)) || '');
+  if (!messageText) return;
+
+  const messageId = data && data.id != null ? String(data.id) : '';
+
+  if (messageId && renderedMessageIds.has(messageId)) {
+    return;
+  }
+
+  const messageDiv = document.createElement('div');
+  messageDiv.className = 'message-placeholder';
+
+  if (messageId) {
+    messageDiv.dataset.messageId = messageId;
+    renderedMessageIds.add(messageId);
+  }
+
+  const username = data.username || 'anonymous';
+
+  const headerDiv = document.createElement('div');
+  headerDiv.className = 'message-header';
+
+  const usernameSpan = document.createElement('span');
+  usernameSpan.className = 'username-placeholder';
+  usernameSpan.textContent = username;
+
+  const timeSpan = document.createElement('span');
+  timeSpan.className = 'message-time';
+  timeSpan.textContent = formatMessageTime(data.createdAt || data.created_at);
+
+  const textSpan = document.createElement('div');
+  textSpan.className = 'text';
+  textSpan.textContent = messageText;
+
+  headerDiv.appendChild(usernameSpan);
+  headerDiv.appendChild(timeSpan);
+  messageDiv.appendChild(headerDiv);
+  messageDiv.appendChild(textSpan);
+  messageArea.appendChild(messageDiv);
+  trimVisibleMessages();
+  messageArea.scrollTop = messageArea.scrollHeight;
+}
+
+function renderMessageList(messages) {
+  messageArea.innerHTML = '';
+  resetRenderedMessageIds();
+  messages.slice(-MAX_VISIBLE_MESSAGES).forEach(appendChatMessage);
+  messageArea.scrollTop = messageArea.scrollHeight;
+}
+
+function loadChannelMessages(channelId) {
+  const requestId = ++messageLoadRequestId;
+  isLoadingMessages = true;
+  queuedLiveMessages = [];
+  messageArea.innerHTML = '';
+  resetRenderedMessageIds();
+
+  window.chatAPI.loadMessages(channelId, (res) => {
+    if (requestId !== messageLoadRequestId || channelId !== currentChannelId) {
+      return;
+    }
+
+    if (!res || !res.success) {
+      console.log((res && res.error) || 'Could not load messages');
+      queuedLiveMessages = [];
+      isLoadingMessages = false;
+      return;
+    }
+
+    renderMessageList(res.messages || []);
+
+    const liveMessages = queuedLiveMessages;
+    queuedLiveMessages = [];
+
+    liveMessages.forEach((messageData) => {
+      if (getMessageChannelId(messageData) === currentChannelId) {
+        appendChatMessage(messageData);
+      }
+    });
+
+    isLoadingMessages = false;
+  });
+}
+
 function switchChannel(channelId) {
-  currentChannelId = channelId;
+  currentChannelId = parseChannelId(channelId);
   document.querySelectorAll('.channel').forEach((c) => c.classList.remove('active'));
 
-  const activeEl = document.querySelector(`[data-channel-id="${channelId}"]`);
+  const activeEl = document.querySelector(`[data-channel-id="${currentChannelId}"]`);
   if (activeEl) activeEl.classList.add('active');
 
-  messageArea.innerHTML = '';
+  loadChannelMessages(currentChannelId);
 }
 
 function renderChannels(data) {
@@ -89,7 +274,7 @@ function renderChannels(data) {
     const channelEl = document.createElement('div');
     channelEl.className = 'channel';
 
-    if (channel.id == currentChannelId) channelEl.classList.add('active');
+    if (parseChannelId(channel.id) === currentChannelId) channelEl.classList.add('active');
 
     channelEl.textContent = `# ${channel.name}`;
     channelEl.dataset.channelId = channel.id;
@@ -107,10 +292,19 @@ form.addEventListener('submit', (e) => {
   const messageText = messageInput.value.trim();
   if (!messageText) return;
 
+  if (!currentUserId) {
+    alert('Log in before sending messages');
+    return;
+  }
+
   window.chatAPI.sendMessage({
-    username: currentUsername,
     message: messageText,
     channelId: currentChannelId
+  }, (res) => {
+    if (!res || !res.success) {
+      console.log((res && res.error) || 'Message could not be sent');
+      messageInput.value = messageText;
+    }
   });
 
   messageInput.value = '';
@@ -120,27 +314,14 @@ form.addEventListener('submit', (e) => {
 
 // chat messages
 window.chatAPI.onMessage((data) => {
-  if (data.channelId && parseInt(data.channelId) !== currentChannelId) return;
+  if (getMessageChannelId(data) !== currentChannelId) return;
 
-  const messageDiv = document.createElement('div');
-  messageDiv.className = 'message-placeholder';
+  if (isLoadingMessages) {
+    queuedLiveMessages.push(data);
+    return;
+  }
 
-  const username = data.username || 'anonymous';
-
-  const usernameSpan = document.createElement('span');
-  usernameSpan.className = 'username-placeholder';
-  usernameSpan.textContent = `${username}: `;
-
-  const textSpan = document.createElement('span');
-  textSpan.className = 'text';
-  textSpan.textContent = data.message;
-
-  messageDiv.appendChild(usernameSpan);
-  messageDiv.appendChild(textSpan);
-  messageArea.appendChild(messageDiv);
-  messageArea.scrollTop = messageArea.scrollHeight;
-
-  messageInput.value = '';
+  appendChatMessage(data);
 });
 
 // Voice channels
@@ -176,6 +357,9 @@ const SPEAKING_LEVEL_THRESHOLD = 0.035;
 const SPEAKING_RELEASE_DELAY = 250;
 const supportsAudioOutputSelection = typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
 const appearanceSettings = [
+  /* App Background
+  {key: 'appBg', label: 'App Background', cssVar: '--app-bg', defaultColor: '#222222'},
+  */
   {key: 'directoryBg', label: 'Directory', cssVar: '--directory-bg', defaultColor: '#3D3D3D'},
   {key: 'channelListBg', label: 'Channels', cssVar: '--channel-list-bg', defaultColor: '#9C7E7E'},
   {key: 'chatBg', label: 'Chat', cssVar: '--chat-bg', defaultColor: '#928989'},
@@ -844,11 +1028,7 @@ async function switchMicrophoneDevice() {
 
 function emitJoinVoice(channelId) {
   return new Promise((resolve) => {
-    window.chatAPI.joinVoice({
-      channelId,
-      userId: currentUserId,
-      username: currentUsername
-    }, resolve);
+    window.chatAPI.joinVoice({channelId}, resolve);
   });
 }
 
@@ -1344,7 +1524,6 @@ window.addEventListener('beforeunload', () => {
 
 updateVoiceControls();
 refreshAudioDevices();
-loadDatabaseUsers();
 
 if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
   navigator.mediaDevices.addEventListener('devicechange', refreshAudioDevices);
@@ -1379,19 +1558,13 @@ signupForm.addEventListener('submit', async (e) => {
   const password = document.getElementById('password').value;
 
   try {
-    const response = await fetch('http://localhost:3000/signup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, email, password })
-    });
+    const data = await window.chatAPI.signup({ username, email, password });
+    signupMessage.innerText = data.message || data.error || '';
 
-    const data = await response.json();
-    signupMessage.innerText = data.message;
-
-    if (response.ok) {
+    if (data.success) {
       signupModal.style.display = 'none';
       signupForm.reset();
-      loadDatabaseUsers();
+      applyAuthenticatedUser(data.user);
     }
   } catch (err) {
     console.log(err);
@@ -1410,6 +1583,11 @@ const loginMessage = document.getElementById('login-message');
 loginModal.style.display = 'none';
 
 loginBtn.onclick = () => {
+  if (currentUserId) {
+    logoutCurrentUser();
+    return;
+  }
+
   loginModal.style.display = 'flex';
   loginMessage.innerText = '';
   loginForm.reset();
@@ -1426,24 +1604,37 @@ loginForm.addEventListener('submit', async (e) => {
   const password = document.getElementById('login-password').value;
 
   try {
-    const response = await fetch('http://localhost:3000/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
-    });
+    const data = await window.chatAPI.login({ email, password });
+    loginMessage.innerText = data.message || data.error || '';
 
-    const data = await response.json();
-    loginMessage.innerText = data.message;
-
-    if (response.ok) {
-      currentUserId = data.userId;
-      currentUsername = data.username || currentUsername;
+    if (data.success) {
       loginModal.style.display = 'none';
       loginForm.reset();
-      renderVoiceChannels();
+      applyAuthenticatedUser(data.user);
     }
   } catch (err) {
     console.log(err);
     loginMessage.innerText = 'Server error';
   }
 });
+
+async function logoutCurrentUser() {
+  if (currentVoiceChannelId) {
+    await leaveVoiceChannel();
+  }
+
+  await window.chatAPI.logout();
+  clearAuthenticatedUser();
+}
+
+async function initializeSession() {
+  updateAuthControls();
+
+  const session = await window.chatAPI.restoreSession();
+
+  if (session.success) {
+    applyAuthenticatedUser(session.user);
+  }
+}
+
+initializeSession();
