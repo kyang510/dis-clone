@@ -11,6 +11,7 @@ const databaseUsersContainer = document.getElementById('database-users');
 let currentChannelId = 1;
 let currentUserId = null;
 let currentUsername = 'anonymous';
+let textChannels = [];
 const DEFAULT_CHANNEL_ID = 1;
 const MAX_VISIBLE_MESSAGES = 100;
 let messageLoadRequestId = 0;
@@ -77,36 +78,62 @@ function clearAuthenticatedUser() {
 
 // Create Channel modal
 const modal = document.getElementById('channel-modal');
+const channelModalTitle = document.getElementById('channel-modal-title');
 const channelInput = document.getElementById('channel-name-input');
 const addBtn = document.getElementById('add-channel-btn');
 const confirmBtn = document.getElementById('create-channel-confirm');
 const cancelBtn = document.getElementById('create-channel-cancel');
+let channelModalMode = 'create';
+let editingChannelId = null;
 
 // hidden on startup
 modal.style.display = 'none';
 
-addBtn.onclick = () => {
+function openTextChannelModal(mode = 'create', channel = null) {
+  channelModalMode = mode;
+  editingChannelId = channel ? parseChannelId(channel.id, 0) : null;
+  channelModalTitle.textContent = mode === 'edit' ? 'Edit Channel' : 'Create Channel';
+  confirmBtn.textContent = mode === 'edit' ? 'Save' : 'Create';
   modal.style.display = 'flex';
-  channelInput.value = '';
+  channelInput.value = channel ? channel.name : '';
+  channelInput.placeholder = '# new-channel';
   channelInput.focus();
+  channelInput.select();
+}
+
+function closeTextChannelModal() {
+  modal.style.display = 'none';
+  channelInput.value = '';
+  channelModalMode = 'create';
+  editingChannelId = null;
+}
+
+addBtn.onclick = () => {
+  openTextChannelModal('create');
 };
 
 cancelBtn.onclick = () => {
-  modal.style.display = 'none';
+  closeTextChannelModal();
 };
 
 confirmBtn.onclick = () => {
   const name = channelInput.value.trim();
   if (!name) return;
 
-  window.chatAPI.sendChannel(name, (res) => {
+  const finish = (res) => {
     if (res.success) {
-      modal.style.display = 'none';
-      channelInput.value = '';
+      closeTextChannelModal();
     } else {
-      alert(res.error || 'Error creating channel');
+      alert(res.error || 'Error saving channel');
     }
-  });
+  };
+
+  if (channelModalMode === 'edit') {
+    window.chatAPI.editChannel({channelId: editingChannelId, name}, finish);
+    return;
+  }
+
+  window.chatAPI.sendChannel(name, finish);
 };
 
 function parseChannelId(channelId, fallback = DEFAULT_CHANNEL_ID) {
@@ -117,6 +144,224 @@ function parseChannelId(channelId, fallback = DEFAULT_CHANNEL_ID) {
 function getMessageChannelId(data) {
   return parseChannelId(data && data.channelId, DEFAULT_CHANNEL_ID);
 }
+
+const channelContextMenu = document.getElementById('channel-context-menu');
+const messageContextMenu = document.getElementById('message-context-menu');
+let activeChannelContext = null;
+let activeMessageContext = null;
+
+function closeChannelContextMenu() {
+  activeChannelContext = null;
+  channelContextMenu.hidden = true;
+}
+
+function closeMessageContextMenu() {
+  activeMessageContext = null;
+  messageContextMenu.hidden = true;
+}
+
+function positionChannelContextMenu(x, y) {
+  channelContextMenu.style.left = '0px';
+  channelContextMenu.style.top = '0px';
+  channelContextMenu.hidden = false;
+
+  const menuRect = channelContextMenu.getBoundingClientRect();
+  const margin = 8;
+  const left = Math.min(x, window.innerWidth - menuRect.width - margin);
+  const top = Math.min(y, window.innerHeight - menuRect.height - margin);
+
+  channelContextMenu.style.left = `${Math.max(margin, left)}px`;
+  channelContextMenu.style.top = `${Math.max(margin, top)}px`;
+}
+
+function openChannelContextMenu(event, type, channel) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  closeRemoteVolumeMenu();
+  closeMessageContextMenu();
+  activeChannelContext = {
+    type,
+    channel: {
+      id: parseChannelId(channel && channel.id, 0),
+      name: (channel && channel.name) || ''
+    }
+  };
+
+  positionChannelContextMenu(event.clientX, event.clientY);
+}
+
+function positionMessageContextMenu(x, y) {
+  messageContextMenu.style.left = '0px';
+  messageContextMenu.style.top = '0px';
+  messageContextMenu.hidden = false;
+
+  const menuRect = messageContextMenu.getBoundingClientRect();
+  const margin = 8;
+  const left = Math.min(x, window.innerWidth - menuRect.width - margin);
+  const top = Math.min(y, window.innerHeight - menuRect.height - margin);
+
+  messageContextMenu.style.left = `${Math.max(margin, left)}px`;
+  messageContextMenu.style.top = `${Math.max(margin, top)}px`;
+}
+
+function openMessageContextMenu(event, message) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  closeChannelContextMenu();
+  closeRemoteVolumeMenu();
+
+  const userId = message && message.userId != null ? String(message.userId) : '';
+  const canModify = currentUserId != null && userId === String(currentUserId);
+
+  activeMessageContext = {
+    id: message && message.id,
+    channelId: message && message.channelId,
+    userId: message && message.userId,
+    message: (message && message.message) || '',
+    canModify
+  };
+
+  messageContextMenu.querySelector('[data-message-action="edit"]').hidden = !canModify;
+  messageContextMenu.querySelector('[data-message-action="delete"]').hidden = !canModify;
+  positionMessageContextMenu(event.clientX, event.clientY);
+}
+
+function runChannelAction(action) {
+  const context = activeChannelContext;
+  closeChannelContextMenu();
+
+  if (action === 'create-text') {
+    openTextChannelModal('create');
+    return;
+  }
+
+  if (action === 'create-voice') {
+    openVoiceChannelModal('create');
+    return;
+  }
+
+  if (!context || !context.channel || !context.channel.id) return;
+
+  if (action === 'edit') {
+    if (context.type === 'voice') {
+      openVoiceChannelModal('edit', context.channel);
+    } else {
+      openTextChannelModal('edit', context.channel);
+    }
+    return;
+  }
+
+  if (action === 'duplicate') {
+    const duplicate = context.type === 'voice'
+      ? window.chatAPI.duplicateVoiceChannel
+      : window.chatAPI.duplicateChannel;
+
+    duplicate({channelId: context.channel.id}, (res) => {
+      if (!res || !res.success) {
+        alert((res && res.error) || 'Could not duplicate channel');
+      }
+    });
+    return;
+  }
+
+  if (action === 'delete') {
+    const label = context.type === 'voice' ? `VC ${context.channel.name}` : `# ${context.channel.name}`;
+
+    if (!confirm(`Delete ${label}?`)) {
+      return;
+    }
+
+    const remove = context.type === 'voice'
+      ? window.chatAPI.deleteVoiceChannel
+      : window.chatAPI.deleteChannel;
+
+    remove({channelId: context.channel.id}, (res) => {
+      if (!res || !res.success) {
+        alert((res && res.error) || 'Could not delete channel');
+      }
+    });
+  }
+}
+
+function runMessageAction(action) {
+  const context = activeMessageContext;
+  closeMessageContextMenu();
+
+  if (!context || !context.id) return;
+
+  if (action === 'copy') {
+    window.chatAPI.copyText(context.message);
+    return;
+  }
+
+  if (!context.canModify) return;
+
+  if (action === 'edit') {
+    const nextMessage = prompt('Edit message', context.message);
+    if (nextMessage == null) return;
+
+    const trimmedMessage = nextMessage.trim();
+    if (!trimmedMessage || trimmedMessage === context.message) return;
+
+    window.chatAPI.editMessage({
+      messageId: context.id,
+      message: trimmedMessage
+    }, (res) => {
+      if (!res || !res.success) {
+        alert((res && res.error) || 'Could not edit message');
+      }
+    });
+    return;
+  }
+
+  if (action === 'delete') {
+    if (!confirm('Delete this message?')) return;
+
+    window.chatAPI.deleteMessage({messageId: context.id}, (res) => {
+      if (!res || !res.success) {
+        alert((res && res.error) || 'Could not delete message');
+      }
+    });
+  }
+}
+
+channelContextMenu.addEventListener('click', (event) => {
+  const actionButton = event.target.closest('[data-channel-action]');
+  if (!actionButton) return;
+
+  event.stopPropagation();
+  runChannelAction(actionButton.dataset.channelAction);
+});
+
+messageContextMenu.addEventListener('click', (event) => {
+  const actionButton = event.target.closest('[data-message-action]');
+  if (!actionButton) return;
+
+  event.stopPropagation();
+  runMessageAction(actionButton.dataset.messageAction);
+});
+
+document.addEventListener('click', () => {
+  closeChannelContextMenu();
+  closeMessageContextMenu();
+});
+document.addEventListener('contextmenu', (event) => {
+  if (!channelContextMenu.hidden && !channelContextMenu.contains(event.target)) {
+    closeChannelContextMenu();
+  }
+
+  if (!messageContextMenu.hidden && !messageContextMenu.contains(event.target)) {
+    closeMessageContextMenu();
+  }
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    closeChannelContextMenu();
+    closeMessageContextMenu();
+  }
+});
 
 function formatMessageTime(value) {
   const date = value ? new Date(value) : new Date();
@@ -171,11 +416,23 @@ function trimVisibleMessages() {
   }
 }
 
+function hasEditedMarker(data) {
+  return Boolean(data && (data.editedAt || data.edited_at));
+}
+
+function getMessageId(data) {
+  return data && data.id != null ? String(data.id) : '';
+}
+
+function getMessageText(data) {
+  return String((data && (data.message || data.body)) || '');
+}
+
 function appendChatMessage(data) {
-  const messageText = String((data && (data.message || data.body)) || '');
+  const messageText = getMessageText(data);
   if (!messageText) return;
 
-  const messageId = data && data.id != null ? String(data.id) : '';
+  const messageId = getMessageId(data);
 
   if (messageId && renderedMessageIds.has(messageId)) {
     return;
@@ -188,6 +445,13 @@ function appendChatMessage(data) {
     messageDiv.dataset.messageId = messageId;
     renderedMessageIds.add(messageId);
   }
+
+  const channelId = getMessageChannelId(data);
+  const userId = data && data.userId != null ? String(data.userId) : '';
+
+  messageDiv.dataset.channelId = String(channelId);
+  messageDiv.dataset.userId = userId;
+  messageDiv.dataset.messageText = messageText;
 
   const username = data.username || 'anonymous';
 
@@ -204,15 +468,71 @@ function appendChatMessage(data) {
 
   const textSpan = document.createElement('div');
   textSpan.className = 'text';
-  textSpan.textContent = messageText;
+
+  const messageTextSpan = document.createElement('span');
+  messageTextSpan.className = 'message-text';
+  messageTextSpan.textContent = messageText;
+
+  const editedSpan = document.createElement('span');
+  editedSpan.className = 'message-edited';
+  editedSpan.textContent = 'edited';
+  editedSpan.hidden = !hasEditedMarker(data);
+
+  textSpan.appendChild(messageTextSpan);
+  textSpan.appendChild(editedSpan);
 
   headerDiv.appendChild(usernameSpan);
   headerDiv.appendChild(timeSpan);
   messageDiv.appendChild(headerDiv);
   messageDiv.appendChild(textSpan);
+  messageDiv.oncontextmenu = (event) => openMessageContextMenu(event, {
+    id: messageId,
+    channelId,
+    userId,
+    message: messageText
+  });
   messageArea.appendChild(messageDiv);
   trimVisibleMessages();
   messageArea.scrollTop = messageArea.scrollHeight;
+}
+
+function updateRenderedMessage(data) {
+  const messageId = getMessageId(data);
+  if (!messageId || getMessageChannelId(data) !== currentChannelId) return;
+
+  const messageEl = messageArea.querySelector(`[data-message-id="${messageId}"]`);
+  if (!messageEl) return;
+
+  const messageText = getMessageText(data);
+  const messageTextEl = messageEl.querySelector('.message-text');
+  const editedEl = messageEl.querySelector('.message-edited');
+
+  if (messageTextEl) {
+    messageTextEl.textContent = messageText;
+  }
+
+  if (editedEl) {
+    editedEl.hidden = !hasEditedMarker(data);
+  }
+
+  messageEl.dataset.messageText = messageText;
+  messageEl.oncontextmenu = (event) => openMessageContextMenu(event, {
+    id: messageId,
+    channelId: getMessageChannelId(data),
+    userId: data && data.userId,
+    message: messageText
+  });
+}
+
+function removeRenderedMessage(data) {
+  const messageId = getMessageId(data);
+  if (!messageId || getMessageChannelId(data) !== currentChannelId) return;
+
+  const messageEl = messageArea.querySelector(`[data-message-id="${messageId}"]`);
+  if (!messageEl) return;
+
+  renderedMessageIds.delete(messageId);
+  messageEl.remove();
 }
 
 function renderMessageList(messages) {
@@ -268,9 +588,19 @@ function switchChannel(channelId) {
 
 function renderChannels(data) {
   const container = document.getElementById('dynamic-channels');
+  const previousChannelId = currentChannelId;
+
+  textChannels = data.channels || [];
+
+  if (!textChannels.some((channel) => parseChannelId(channel.id, 0) === currentChannelId)) {
+    currentChannelId = textChannels.length > 0
+      ? parseChannelId(textChannels[0].id, DEFAULT_CHANNEL_ID)
+      : DEFAULT_CHANNEL_ID;
+  }
+
   container.innerHTML = '';
 
-  data.channels.forEach((channel) => {
+  textChannels.forEach((channel) => {
     const channelEl = document.createElement('div');
     channelEl.className = 'channel';
 
@@ -279,9 +609,14 @@ function renderChannels(data) {
     channelEl.textContent = `# ${channel.name}`;
     channelEl.dataset.channelId = channel.id;
     channelEl.onclick = () => switchChannel(channel.id);
+    channelEl.oncontextmenu = (event) => openChannelContextMenu(event, 'text', channel);
 
     container.appendChild(channelEl);
   });
+
+  if (previousChannelId !== currentChannelId && currentUserId) {
+    loadChannelMessages(currentChannelId);
+  }
 }
 
 window.chatAPI.onNewChannel(renderChannels);
@@ -324,8 +659,17 @@ window.chatAPI.onMessage((data) => {
   appendChatMessage(data);
 });
 
+window.chatAPI.onMessageEdited((data) => {
+  updateRenderedMessage(data);
+});
+
+window.chatAPI.onMessageDeleted((data) => {
+  removeRenderedMessage(data);
+});
+
 // Voice channels
 const voiceModal = document.getElementById('voice-channel-modal');
+const voiceChannelModalTitle = document.getElementById('voice-channel-modal-title');
 const voiceChannelInput = document.getElementById('voice-channel-name-input');
 const addVoiceBtn = document.getElementById('add-voice-channel-btn');
 const confirmVoiceBtn = document.getElementById('create-voice-channel-confirm');
@@ -391,32 +735,57 @@ const remoteUserVolumes = new Map();
 const speakingSocketIds = new Set();
 let activeRemoteVolumeSocketId = null;
 let localVoiceActivityDetector = null;
+let voiceChannelModalMode = 'create';
+let editingVoiceChannelId = null;
 
 voiceModal.style.display = 'none';
 voiceSettingsModal.style.display = 'none';
 
-addVoiceBtn.onclick = () => {
+function openVoiceChannelModal(mode = 'create', channel = null) {
+  voiceChannelModalMode = mode;
+  editingVoiceChannelId = channel ? parseChannelId(channel.id, 0) : null;
+  voiceChannelModalTitle.textContent = mode === 'edit' ? 'Edit Voice Channel' : 'Create Voice Channel';
+  confirmVoiceBtn.textContent = mode === 'edit' ? 'Save' : 'Create';
   voiceModal.style.display = 'flex';
-  voiceChannelInput.value = '';
+  voiceChannelInput.value = channel ? channel.name : '';
+  voiceChannelInput.placeholder = 'New Voice Chat';
   voiceChannelInput.focus();
+  voiceChannelInput.select();
+}
+
+function closeVoiceChannelModal() {
+  voiceModal.style.display = 'none';
+  voiceChannelInput.value = '';
+  voiceChannelModalMode = 'create';
+  editingVoiceChannelId = null;
+}
+
+addVoiceBtn.onclick = () => {
+  openVoiceChannelModal('create');
 };
 
 cancelVoiceBtn.onclick = () => {
-  voiceModal.style.display = 'none';
+  closeVoiceChannelModal();
 };
 
 confirmVoiceBtn.onclick = () => {
   const name = voiceChannelInput.value.trim();
   if (!name) return;
 
-  window.chatAPI.createVoiceChannel(name, (res) => {
+  const finish = (res) => {
     if (res.success) {
-      voiceModal.style.display = 'none';
-      voiceChannelInput.value = '';
+      closeVoiceChannelModal();
     } else {
-      alert(res.error || 'Error creating voice channel');
+      alert(res.error || 'Error saving voice channel');
     }
-  });
+  };
+
+  if (voiceChannelModalMode === 'edit') {
+    window.chatAPI.editVoiceChannel({channelId: editingVoiceChannelId, name}, finish);
+    return;
+  }
+
+  window.chatAPI.createVoiceChannel(name, finish);
 };
 
 voiceSettingsBtn.onclick = async () => {
@@ -611,13 +980,32 @@ renderAppearanceControls();
 
 // vc channels span/div name changes
 function renderVoiceChannels() {
+  const activeVoiceChannel = currentVoiceChannelId
+    ? voiceChannels.find((channel) => parseChannelId(channel.id, 0) === currentVoiceChannelId)
+    : null;
+
+  if (currentVoiceChannelId && !activeVoiceChannel) {
+    closeAllPeerConnections();
+    stopLocalStream();
+    currentVoiceChannelId = null;
+    currentVoiceChannelName = '';
+    currentVoiceSocketId = null;
+    isVoiceDeafened = false;
+    updateRemoteAudioMutedState();
+    updateVoiceControls();
+  } else if (activeVoiceChannel && currentVoiceChannelName !== activeVoiceChannel.name) {
+    currentVoiceChannelName = activeVoiceChannel.name;
+    updateVoiceControls();
+  }
+
   voiceChannelsContainer.innerHTML = '';
 
   voiceChannels.forEach((channel) => {
-    const users = voiceUsersByChannel[channel.id] || [];
+    const channelId = parseChannelId(channel.id, 0);
+    const users = voiceUsersByChannel[channel.id] || voiceUsersByChannel[channelId] || [];
     const channelEl = document.createElement('div');
     channelEl.className = 'voice-channel';
-    if (channel.id === currentVoiceChannelId) {
+    if (channelId === currentVoiceChannelId) {
       channelEl.classList.add('active');
     }
 
@@ -636,7 +1024,7 @@ function renderVoiceChannels() {
     topRow.appendChild(count);
     channelEl.appendChild(topRow);
 
-    if (channel.id === currentVoiceChannelId && users.length > 0) {
+    if (channelId === currentVoiceChannelId && users.length > 0) {
       const membersEl = document.createElement('div');
       membersEl.className = 'voice-members';
 
@@ -668,7 +1056,11 @@ function renderVoiceChannels() {
       channelEl.appendChild(membersEl);
     }
 
-    channelEl.onclick = () => joinVoiceChannel(channel.id);
+    channelEl.onclick = () => joinVoiceChannel(channelId);
+    channelEl.oncontextmenu = (event) => openChannelContextMenu(event, 'voice', {
+      ...channel,
+      id: channelId
+    });
     voiceChannelsContainer.appendChild(channelEl);
   });
 }
@@ -731,6 +1123,8 @@ function openRemoteVolumeMenu(event, user) {
   event.preventDefault();
   event.stopPropagation();
 
+  closeChannelContextMenu();
+  closeMessageContextMenu();
   activeRemoteVolumeSocketId = user.socketId;
   const volume = getRemoteUserVolume(user.socketId);
 
@@ -1345,12 +1739,14 @@ async function createOfferForUser(remoteSocketId) {
 }
 
 async function joinVoiceChannel(channelId) {
+  channelId = parseChannelId(channelId, 0);
+
   if (!currentUserId) {
     alert('Log in before joining voice');
     return;
   }
 
-  const channel = voiceChannels.find((voiceChannel) => voiceChannel.id === channelId);
+  const channel = voiceChannels.find((voiceChannel) => parseChannelId(voiceChannel.id, 0) === channelId);
   if (!channel || currentVoiceChannelId === channelId) return;
 
   if (currentVoiceChannelId) {

@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, clipboard } = require('electron')
 
 contextBridge.exposeInMainWorld('versions', {
   node: () => process.versions.node,
@@ -319,9 +319,42 @@ contextBridge.exposeInMainWorld('chatAPI', {
   }], callback),
   loadMessages: (channelId, callback) => emitWithAuth('load messages', [{channelId}], callback),
   onMessage: (callback) => socket.on('chat message', callback),
+  editMessage: (data, callback) => emitWithAuth('edit-message', [{
+    messageId: data && data.messageId,
+    message: data && data.message
+  }], callback),
+  deleteMessage: (data, callback) => emitWithAuth('delete-message', [{
+    messageId: data && data.messageId
+  }], callback),
+  copyText: (text) => {
+    clipboard.writeText(String(text || ''));
+    return true;
+  },
+  onMessageEdited: (callback) => socket.on('message-edited', callback),
+  onMessageDeleted: (callback) => socket.on('message-deleted', callback),
   sendChannel: (name, callback) => emitWithAuth('create-channel', [name], callback),
+  editChannel: (data, callback) => emitWithAuth('edit-channel', [{
+    channelId: data && data.channelId,
+    name: data && data.name
+  }], callback),
+  duplicateChannel: (data, callback) => emitWithAuth('duplicate-channel', [{
+    channelId: data && data.channelId
+  }], callback),
+  deleteChannel: (data, callback) => emitWithAuth('delete-channel', [{
+    channelId: data && data.channelId
+  }], callback),
   onNewChannel: (callback) => socket.on('new-channel', callback),
   createVoiceChannel: (name, callback) => emitWithAuth('create-voice-channel', [name], callback),
+  editVoiceChannel: (data, callback) => emitWithAuth('edit-voice-channel', [{
+    channelId: data && data.channelId,
+    name: data && data.name
+  }], callback),
+  duplicateVoiceChannel: (data, callback) => emitWithAuth('duplicate-voice-channel', [{
+    channelId: data && data.channelId
+  }], callback),
+  deleteVoiceChannel: (data, callback) => emitWithAuth('delete-voice-channel', [{
+    channelId: data && data.channelId
+  }], callback),
   joinVoice: (data, callback) => emitWithAuth('join-voice', [{channelId: data && data.channelId}], callback),
   leaveVoice: (callback) => emitWithAuth('leave-voice', [], callback),
   sendVoiceOffer: (data) => emitWithoutAck('voice-offer', data),

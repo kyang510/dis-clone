@@ -22,6 +22,18 @@ const REFRESH_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
 const JWT_ISSUER = 'dis-clone';
 const JWT_AUDIENCE = 'dis-clone-client';
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
+const DEFAULT_CHANNELS = [
+  {id: 1, name: 'general'},
+  {id: 2, name: 'memes'},
+  {id: 3, name: 'gaming'},
+  {id: 4, name: 'music'}
+];
+const DEFAULT_VOICE_CHANNELS = [
+  {id: 1, name: 'general'},
+  {id: 2, name: 'memes'},
+  {id: 3, name: 'gaming'},
+  {id: 4, name: 'music'}
+];
 
 if (!process.env.JWT_SECRET) {
   console.warn('JWT_SECRET is not set. Using a one-time development secret; sessions will expire when the server restarts.');
@@ -63,6 +75,25 @@ function toMysqlDate(date) {
   return date.toISOString().slice(0, 19).replace('T', ' ');
 }
 
+function normalizeChannelName(name) {
+  return String(name || '').trim();
+}
+
+function channelNameKey(name) {
+  return normalizeChannelName(name).toLowerCase();
+}
+
+async function ensureUsersTable() {
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      username VARCHAR(50) UNIQUE NOT NULL,
+      email VARCHAR(255) UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL
+    )
+  `);
+}
+
 async function ensureSessionTable() {
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -81,19 +112,94 @@ async function ensureSessionTable() {
   `);
 }
 
-db.connect((err) => {
-  if (err) {
-    console.log("Database connection failed");
-    console.log(err);
-    return;
-  }
+async function ensureChannelsTable() {
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS channels (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(50) NOT NULL,
+      name_key VARCHAR(50) NOT NULL UNIQUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+}
 
-  console.log("Connected to MySQL");
-  ensureSessionTable().catch((tableErr) => {
-    console.log("Could not create sessions table");
-    console.log(tableErr);
-  });
-});
+async function ensureVoiceChannelsTable() {
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS voice_channels (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(50) NOT NULL,
+      name_key VARCHAR(50) NOT NULL UNIQUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+}
+
+async function ensureMessagesTable() {
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      channel_id INT NOT NULL,
+      user_id INT NOT NULL,
+      username VARCHAR(50) NOT NULL,
+      body TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      edited_at TIMESTAMP NULL,
+      INDEX idx_messages_channel_id_id (channel_id, id),
+      INDEX idx_messages_user_id (user_id),
+      CONSTRAINT fk_messages_channel_id FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
+      CONSTRAINT fk_messages_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  try {
+    await dbQuery("ALTER TABLE messages ADD COLUMN edited_at TIMESTAMP NULL");
+  } catch (err) {
+    if (!err || err.code !== 'ER_DUP_FIELDNAME') {
+      throw err;
+    }
+  }
+}
+
+async function seedDefaultChannels(tableName, defaults) {
+  for (const channel of defaults) {
+    await dbQuery(
+      `INSERT IGNORE INTO ${tableName} (id, name, name_key) VALUES (?, ?, ?)`,
+      [channel.id, channel.name, channelNameKey(channel.name)]
+    );
+  }
+}
+
+async function loadChannelsFromDb() {
+  const rows = await dbQuery("SELECT id, name FROM channels ORDER BY id ASC");
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name
+  }));
+}
+
+async function loadVoiceChannelsFromDb() {
+  const rows = await dbQuery("SELECT id, name FROM voice_channels ORDER BY id ASC");
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name
+  }));
+}
+
+async function loadChannelCaches() {
+  channels = await loadChannelsFromDb();
+  voiceChannels = await loadVoiceChannelsFromDb();
+}
+
+async function initializeDatabase() {
+  await ensureUsersTable();
+  await ensureChannelsTable();
+  await ensureVoiceChannelsTable();
+  await seedDefaultChannels('channels', DEFAULT_CHANNELS);
+  await seedDefaultChannels('voice_channels', DEFAULT_VOICE_CHANNELS);
+  await ensureSessionTable();
+  await ensureMessagesTable();
+  await loadChannelCaches();
+}
 
 function base64UrlEncode(value) {
   return Buffer.from(value).toString('base64url');
@@ -452,21 +558,8 @@ app.post("/logout", async (req, res) => {
   }
 });
 
-// In-memory channel storage
-let channels = [
-  {id: 1, name: 'general'},
-  {id: 2, name: 'memes'},
-  {id: 3, name: 'gaming'},
-  {id: 4, name: 'music'}
-];
-let nextChannelId = channels.reduce((maxId, channel) => Math.max(maxId, channel.id), 0) + 1;
-
-let voiceChannels = [
-  {id: 1, name: 'general'},
-  {id: 2, name: 'memes'},
-  {id: 3, name: 'gaming'},
-  {id: 4, name: 'music'}
-];
+let channels = [];
+let voiceChannels = [];
 
 const voiceMembers = new Map();
 const voiceChannelBySocket = new Map();
@@ -475,8 +568,14 @@ function voiceRoomName(channelId) {
   return `voice:${channelId}`;
 }
 
+function getTextChannel(channelId) {
+  const id = parsePositiveInt(channelId, 0);
+  return channels.find((channel) => channel.id === id);
+}
+
 function getVoiceChannel(channelId) {
-  return voiceChannels.find((channel) => channel.id === channelId);
+  const id = parsePositiveInt(channelId, 0);
+  return voiceChannels.find((channel) => channel.id === id);
 }
 
 function getVoiceMemberList(channelId) {
@@ -500,6 +599,10 @@ function emitVoiceChannels() {
     channels: voiceChannels,
     usersByChannel: getVoiceUsersByChannel()
   });
+}
+
+function emitTextChannels() {
+  io.emit('new-channel', {channels});
 }
 
 function emitVoiceUsers(channelId) {
@@ -542,8 +645,27 @@ function leaveVoiceChannel(socket) {
   emitVoiceChannels();
 }
 
-function areVoicePeersInSameChannel(senderSocketId, receiverSocketId, channelId) {
+function removeVoiceChannelMembers(channelId) {
   const members = voiceMembers.get(channelId);
+  if (!members) return;
+
+  Array.from(members.keys()).forEach((socketId) => {
+    const memberSocket = io.sockets.sockets.get(socketId);
+
+    voiceChannelBySocket.delete(socketId);
+
+    if (memberSocket) {
+      sendVoiceError(memberSocket, 'Voice channel deleted');
+      memberSocket.leave(voiceRoomName(channelId));
+    }
+  });
+
+  voiceMembers.delete(channelId);
+}
+
+function areVoicePeersInSameChannel(senderSocketId, receiverSocketId, channelId) {
+  const parsedChannelId = parsePositiveInt(channelId, 0);
+  const members = voiceMembers.get(parsedChannelId);
   return Boolean(
     members &&
     members.has(senderSocketId) &&
@@ -563,7 +685,8 @@ function normalizeMessageRow(row) {
     userId: row.user_id,
     username: row.username || 'anonymous',
     message: row.body,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    editedAt: row.edited_at
   };
 }
 
@@ -572,9 +695,40 @@ function normalizeUsername(username) {
   return (trimmedUsername || 'anonymous').slice(0, 50);
 }
 
+function validateChannelName(name) {
+  const channelName = normalizeChannelName(name);
+
+  if (!channelName || channelName.length > 50) {
+    return null;
+  }
+
+  return channelName;
+}
+
+function isDuplicateEntryError(err) {
+  return err && err.code === 'ER_DUP_ENTRY';
+}
+
+function getDuplicateChannelName(channelList, baseName) {
+  const existingNames = new Set(channelList.map((channel) => channelNameKey(channel.name)));
+  const fallbackName = normalizeChannelName(baseName) || 'channel';
+
+  for (let index = 1; index < 1000; index += 1) {
+    const suffix = index === 1 ? ' copy' : ` copy ${index}`;
+    const candidateBase = fallbackName.slice(0, 50 - suffix.length).trim();
+    const candidate = `${candidateBase}${suffix}`;
+
+    if (candidateBase && !existingNames.has(channelNameKey(candidate))) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 function loadChannelMessages(channelId, callback) {
   db.query(
-    "SELECT id, channel_id, user_id, username, body, created_at FROM messages WHERE channel_id = ? ORDER BY id DESC LIMIT ?",
+    "SELECT id, channel_id, user_id, username, body, created_at, edited_at FROM messages WHERE channel_id = ? ORDER BY id DESC LIMIT ?",
     [channelId, MESSAGE_HISTORY_LIMIT],
     (err, results) => {
       if (err) {
@@ -586,6 +740,15 @@ function loadChannelMessages(channelId, callback) {
       callback(null, results.reverse().map(normalizeMessageRow));
     }
   );
+}
+
+async function getMessageById(messageId) {
+  const rows = await dbQuery(
+    "SELECT id, channel_id, user_id, username, body, created_at, edited_at FROM messages WHERE id = ? LIMIT 1",
+    [messageId]
+  );
+
+  return rows[0] || null;
 }
 
 function sendSocketAuthError(socket, callback) {
@@ -622,31 +785,167 @@ io.on('connection', (socket) => {
     usersByChannel: getVoiceUsersByChannel()
   });
 
-  socket.on('create-channel', (name, callback) => {
+  socket.on('create-channel', async (name, callback) => {
     if (!getSocketUser(socket, callback)) return;
 
-    if (!name || name.trim().length < 1 || name.trim().length > 50) {
+    const channelName = validateChannelName(name);
+
+    if (!channelName) {
       if (typeof callback === 'function') callback({success: false, error: 'Invalid channel name'});
       return;
     }
-    const channelName = name.trim();
-    if (channels.find(c => c.name.toLowerCase() === channelName.toLowerCase())) {
-      if (typeof callback === 'function') callback({success: false, error: 'Channel already exists'});
+
+    try {
+      const result = await dbQuery(
+        "INSERT INTO channels (name, name_key) VALUES (?, ?)",
+        [channelName, channelNameKey(channelName)]
+      );
+      await loadChannelCaches();
+
+      const newChannel = channels.find((channel) => channel.id === result.insertId) || {
+        id: result.insertId,
+        name: channelName
+      };
+
+      emitTextChannels();
+      if (typeof callback === 'function') callback({success: true, channel: newChannel});
+    } catch (err) {
+      if (typeof callback === 'function') {
+        callback({
+          success: false,
+          error: isDuplicateEntryError(err) ? 'Channel already exists' : 'Could not create channel'
+        });
+      }
+
+      if (!isDuplicateEntryError(err)) {
+        console.log("/channels INSERT error:", err);
+      }
+    }
+  });
+
+  socket.on('edit-channel', async (data, callback) => {
+    if (!getSocketUser(socket, callback)) return;
+
+    const channelId = parsePositiveInt(data && data.channelId, 0);
+    const channelName = validateChannelName(data && data.name);
+
+    if (!getTextChannel(channelId)) {
+      if (typeof callback === 'function') callback({success: false, error: 'Channel not found'});
       return;
     }
-    const newChannel = {
-      id: nextChannelId++,
-      name: channelName
-    };
-    channels.push(newChannel);
-    io.emit('new-channel', {channels});
-    if (typeof callback === 'function') callback({success: true, channel: newChannel});
+
+    if (!channelName) {
+      if (typeof callback === 'function') callback({success: false, error: 'Invalid channel name'});
+      return;
+    }
+
+    try {
+      await dbQuery(
+        "UPDATE channels SET name = ?, name_key = ? WHERE id = ?",
+        [channelName, channelNameKey(channelName), channelId]
+      );
+      await loadChannelCaches();
+      emitTextChannels();
+
+      if (typeof callback === 'function') {
+        callback({success: true, channel: getTextChannel(channelId)});
+      }
+    } catch (err) {
+      if (typeof callback === 'function') {
+        callback({
+          success: false,
+          error: isDuplicateEntryError(err) ? 'Channel already exists' : 'Could not edit channel'
+        });
+      }
+
+      if (!isDuplicateEntryError(err)) {
+        console.log("/channels UPDATE error:", err);
+      }
+    }
+  });
+
+  socket.on('duplicate-channel', async (data, callback) => {
+    if (!getSocketUser(socket, callback)) return;
+
+    const channelId = parsePositiveInt(data && data.channelId, 0);
+    const sourceChannel = getTextChannel(channelId);
+
+    if (!sourceChannel) {
+      if (typeof callback === 'function') callback({success: false, error: 'Channel not found'});
+      return;
+    }
+
+    const channelName = getDuplicateChannelName(channels, sourceChannel.name);
+
+    if (!channelName) {
+      if (typeof callback === 'function') callback({success: false, error: 'Could not duplicate channel'});
+      return;
+    }
+
+    try {
+      const result = await dbQuery(
+        "INSERT INTO channels (name, name_key) VALUES (?, ?)",
+        [channelName, channelNameKey(channelName)]
+      );
+      await loadChannelCaches();
+
+      const newChannel = getTextChannel(result.insertId) || {
+        id: result.insertId,
+        name: channelName
+      };
+
+      emitTextChannels();
+      if (typeof callback === 'function') callback({success: true, channel: newChannel});
+    } catch (err) {
+      if (typeof callback === 'function') callback({success: false, error: 'Could not duplicate channel'});
+      console.log("/channels duplicate error:", err);
+    }
+  });
+
+  socket.on('delete-channel', async (data, callback) => {
+    if (!getSocketUser(socket, callback)) return;
+
+    const channelId = parsePositiveInt(data && data.channelId, 0);
+
+    if (!getTextChannel(channelId)) {
+      if (typeof callback === 'function') callback({success: false, error: 'Channel not found'});
+      return;
+    }
+
+    if (channels.length <= 1) {
+      if (typeof callback === 'function') callback({success: false, error: 'Keep at least one text channel'});
+      return;
+    }
+
+    try {
+      await dbQuery("DELETE FROM messages WHERE channel_id = ?", [channelId]);
+      await dbQuery("DELETE FROM channels WHERE id = ?", [channelId]);
+      await loadChannelCaches();
+      emitTextChannels();
+
+      if (typeof callback === 'function') callback({success: true});
+    } catch (err) {
+      if (typeof callback === 'function') callback({success: false, error: 'Could not delete channel'});
+      console.log("/channels DELETE error:", err);
+    }
   });
 
   socket.on('load messages', (data, callback) => {
     if (!getSocketUser(socket, callback)) return;
 
     const channelId = parsePositiveInt(data && data.channelId, DEFAULT_CHANNEL_ID);
+
+    if (!getTextChannel(channelId)) {
+      if (typeof callback === 'function') {
+        callback({
+          success: false,
+          error: 'Channel not found',
+          messages: [],
+          limit: MESSAGE_HISTORY_LIMIT
+        });
+      }
+      return;
+    }
 
     loadChannelMessages(channelId, (err, messages) => {
       if (typeof callback !== 'function') return;
@@ -676,6 +975,13 @@ io.on('connection', (socket) => {
     const channelId = parsePositiveInt(data && data.channelId, DEFAULT_CHANNEL_ID);
     const body = String((data && data.message) || '').trim();
 
+    if (!getTextChannel(channelId)) {
+      if (typeof callback === 'function') {
+        callback({success: false, error: 'Channel not found'});
+      }
+      return;
+    }
+
     if (!body) {
       if (typeof callback === 'function') {
         callback({success: false, error: 'Message cannot be empty'});
@@ -701,7 +1007,8 @@ io.on('connection', (socket) => {
           userId: user.id,
           username: user.username,
           message: body,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          editedAt: null
         };
 
         io.emit('chat message', savedMessage);
@@ -713,38 +1020,244 @@ io.on('connection', (socket) => {
     );
   });
 
-  socket.on('create-voice-channel', (name, callback) => {
+  socket.on('edit-message', async (data, callback) => {
+    const user = getSocketUser(socket, callback);
+    if (!user) return;
+
+    const messageId = parsePositiveInt(data && data.messageId, 0);
+    const body = String((data && data.message) || '').trim();
+
+    if (!messageId) {
+      if (typeof callback === 'function') callback({success: false, error: 'Message not found'});
+      return;
+    }
+
+    if (!body) {
+      if (typeof callback === 'function') callback({success: false, error: 'Message cannot be empty'});
+      return;
+    }
+
+    try {
+      const existingMessage = await getMessageById(messageId);
+
+      if (!existingMessage) {
+        if (typeof callback === 'function') callback({success: false, error: 'Message not found'});
+        return;
+      }
+
+      if (String(existingMessage.user_id) !== String(user.id)) {
+        if (typeof callback === 'function') callback({success: false, error: 'You can only edit your messages'});
+        return;
+      }
+
+      await dbQuery(
+        "UPDATE messages SET body = ?, edited_at = UTC_TIMESTAMP() WHERE id = ? AND user_id = ?",
+        [body, messageId, user.id]
+      );
+
+      const updatedMessage = normalizeMessageRow(await getMessageById(messageId));
+      io.emit('message-edited', updatedMessage);
+
+      if (typeof callback === 'function') {
+        callback({success: true, message: updatedMessage});
+      }
+    } catch (err) {
+      console.log("/messages UPDATE error:", err);
+      if (typeof callback === 'function') callback({success: false, error: 'Could not edit message'});
+    }
+  });
+
+  socket.on('delete-message', async (data, callback) => {
+    const user = getSocketUser(socket, callback);
+    if (!user) return;
+
+    const messageId = parsePositiveInt(data && data.messageId, 0);
+
+    if (!messageId) {
+      if (typeof callback === 'function') callback({success: false, error: 'Message not found'});
+      return;
+    }
+
+    try {
+      const existingMessage = await getMessageById(messageId);
+
+      if (!existingMessage) {
+        if (typeof callback === 'function') callback({success: false, error: 'Message not found'});
+        return;
+      }
+
+      if (String(existingMessage.user_id) !== String(user.id)) {
+        if (typeof callback === 'function') callback({success: false, error: 'You can only delete your messages'});
+        return;
+      }
+
+      await dbQuery("DELETE FROM messages WHERE id = ? AND user_id = ?", [messageId, user.id]);
+
+      io.emit('message-deleted', {
+        id: messageId,
+        channelId: existingMessage.channel_id
+      });
+
+      if (typeof callback === 'function') callback({success: true});
+    } catch (err) {
+      console.log("/messages DELETE error:", err);
+      if (typeof callback === 'function') callback({success: false, error: 'Could not delete message'});
+    }
+  });
+
+  socket.on('create-voice-channel', async (name, callback) => {
     if (!getSocketUser(socket, callback)) return;
 
-    if (!name || name.trim().length < 1 || name.trim().length > 50) {
+    const channelName = validateChannelName(name);
+
+    if (!channelName) {
       if (typeof callback === 'function') callback({success: false, error: 'Invalid voice channel name'});
       return;
     }
 
-    const channelName = name.trim();
+    try {
+      const result = await dbQuery(
+        "INSERT INTO voice_channels (name, name_key) VALUES (?, ?)",
+        [channelName, channelNameKey(channelName)]
+      );
+      voiceChannels = await loadVoiceChannelsFromDb();
 
-    if (voiceChannels.find(c => c.name.toLowerCase() === channelName.toLowerCase())) {
-      if (typeof callback === 'function') callback({success: false, error: 'Voice channel already exists'});
+      const newChannel = voiceChannels.find((channel) => channel.id === result.insertId) || {
+        id: result.insertId,
+        name: channelName
+      };
+
+      emitVoiceChannels();
+      if (typeof callback === 'function') callback({success: true, channel: newChannel});
+    } catch (err) {
+      if (typeof callback === 'function') {
+        callback({
+          success: false,
+          error: isDuplicateEntryError(err) ? 'Voice channel already exists' : 'Could not create voice channel'
+        });
+      }
+
+      if (!isDuplicateEntryError(err)) {
+        console.log("/voice_channels INSERT error:", err);
+      }
+    }
+  });
+
+  socket.on('edit-voice-channel', async (data, callback) => {
+    if (!getSocketUser(socket, callback)) return;
+
+    const channelId = parsePositiveInt(data && data.channelId, 0);
+    const channelName = validateChannelName(data && data.name);
+
+    if (!getVoiceChannel(channelId)) {
+      if (typeof callback === 'function') callback({success: false, error: 'Voice channel not found'});
       return;
     }
 
-    const newChannel = {
-      id: Date.now(),
-      name: channelName
-    };
+    if (!channelName) {
+      if (typeof callback === 'function') callback({success: false, error: 'Invalid voice channel name'});
+      return;
+    }
 
-    voiceChannels.push(newChannel);
-    emitVoiceChannels();
-    if (typeof callback === 'function') callback({success: true, channel: newChannel});
+    try {
+      await dbQuery(
+        "UPDATE voice_channels SET name = ?, name_key = ? WHERE id = ?",
+        [channelName, channelNameKey(channelName), channelId]
+      );
+      voiceChannels = await loadVoiceChannelsFromDb();
+      emitVoiceChannels();
+
+      if (typeof callback === 'function') {
+        callback({success: true, channel: getVoiceChannel(channelId)});
+      }
+    } catch (err) {
+      if (typeof callback === 'function') {
+        callback({
+          success: false,
+          error: isDuplicateEntryError(err) ? 'Voice channel already exists' : 'Could not edit voice channel'
+        });
+      }
+
+      if (!isDuplicateEntryError(err)) {
+        console.log("/voice_channels UPDATE error:", err);
+      }
+    }
+  });
+
+  socket.on('duplicate-voice-channel', async (data, callback) => {
+    if (!getSocketUser(socket, callback)) return;
+
+    const channelId = parsePositiveInt(data && data.channelId, 0);
+    const sourceChannel = getVoiceChannel(channelId);
+
+    if (!sourceChannel) {
+      if (typeof callback === 'function') callback({success: false, error: 'Voice channel not found'});
+      return;
+    }
+
+    const channelName = getDuplicateChannelName(voiceChannels, sourceChannel.name);
+
+    if (!channelName) {
+      if (typeof callback === 'function') callback({success: false, error: 'Could not duplicate voice channel'});
+      return;
+    }
+
+    try {
+      const result = await dbQuery(
+        "INSERT INTO voice_channels (name, name_key) VALUES (?, ?)",
+        [channelName, channelNameKey(channelName)]
+      );
+      voiceChannels = await loadVoiceChannelsFromDb();
+
+      const newChannel = getVoiceChannel(result.insertId) || {
+        id: result.insertId,
+        name: channelName
+      };
+
+      emitVoiceChannels();
+      if (typeof callback === 'function') callback({success: true, channel: newChannel});
+    } catch (err) {
+      if (typeof callback === 'function') callback({success: false, error: 'Could not duplicate voice channel'});
+      console.log("/voice_channels duplicate error:", err);
+    }
+  });
+
+  socket.on('delete-voice-channel', async (data, callback) => {
+    if (!getSocketUser(socket, callback)) return;
+
+    const channelId = parsePositiveInt(data && data.channelId, 0);
+
+    if (!getVoiceChannel(channelId)) {
+      if (typeof callback === 'function') callback({success: false, error: 'Voice channel not found'});
+      return;
+    }
+
+    if (voiceChannels.length <= 1) {
+      if (typeof callback === 'function') callback({success: false, error: 'Keep at least one voice channel'});
+      return;
+    }
+
+    try {
+      await dbQuery("DELETE FROM voice_channels WHERE id = ?", [channelId]);
+      removeVoiceChannelMembers(channelId);
+      voiceChannels = await loadVoiceChannelsFromDb();
+      emitVoiceChannels();
+
+      if (typeof callback === 'function') callback({success: true});
+    } catch (err) {
+      if (typeof callback === 'function') callback({success: false, error: 'Could not delete voice channel'});
+      console.log("/voice_channels DELETE error:", err);
+    }
   });
 
   socket.on('join-voice', (data, callback) => {
     const authUser = getSocketUser(socket, callback);
     if (!authUser) return;
 
-    const channelId = data && data.channelId;
+    const channelId = parsePositiveInt(data && data.channelId, 0);
+    const channel = getVoiceChannel(channelId);
 
-    if (!getVoiceChannel(channelId)) {
+    if (!channel) {
       const error = 'Voice channel not found';
       sendVoiceError(socket, error);
       if (typeof callback === 'function') callback({success: false, error});
@@ -756,7 +1269,7 @@ io.on('connection', (socket) => {
       if (typeof callback === 'function') {
         callback({
           success: true,
-          channel: getVoiceChannel(channelId),
+          channel,
           socketId: socket.id,
           users: getVoiceMemberList(channelId).filter((user) => user.socketId !== socket.id)
         });
@@ -792,7 +1305,7 @@ io.on('connection', (socket) => {
     if (typeof callback === 'function') {
       callback({
         success: true,
-        channel: getVoiceChannel(channelId),
+        channel,
         socketId: socket.id,
         users: existingUsers
       });
@@ -810,15 +1323,17 @@ io.on('connection', (socket) => {
   socket.on('voice-offer', (data) => {
     if (!getSocketUser(socket)) return;
 
-    if (!data || !areVoicePeersInSameChannel(socket.id, data.to, data.channelId)) {
+    const channelId = parsePositiveInt(data && data.channelId, 0);
+
+    if (!data || !areVoicePeersInSameChannel(socket.id, data.to, channelId)) {
       sendVoiceError(socket, 'Cannot send voice offer');
       return;
     }
 
     io.to(data.to).emit('voice-offer', {
-      channelId: data.channelId,
+      channelId,
       from: socket.id,
-      user: voiceMembers.get(data.channelId).get(socket.id),
+      user: voiceMembers.get(channelId).get(socket.id),
       offer: data.offer
     });
   });
@@ -826,13 +1341,15 @@ io.on('connection', (socket) => {
   socket.on('voice-answer', (data) => {
     if (!getSocketUser(socket)) return;
 
-    if (!data || !areVoicePeersInSameChannel(socket.id, data.to, data.channelId)) {
+    const channelId = parsePositiveInt(data && data.channelId, 0);
+
+    if (!data || !areVoicePeersInSameChannel(socket.id, data.to, channelId)) {
       sendVoiceError(socket, 'Cannot send voice answer');
       return;
     }
 
     io.to(data.to).emit('voice-answer', {
-      channelId: data.channelId,
+      channelId,
       from: socket.id,
       answer: data.answer
     });
@@ -841,12 +1358,14 @@ io.on('connection', (socket) => {
   socket.on('voice-ice-candidate', (data) => {
     if (!getSocketUser(socket)) return;
 
-    if (!data || !areVoicePeersInSameChannel(socket.id, data.to, data.channelId)) {
+    const channelId = parsePositiveInt(data && data.channelId, 0);
+
+    if (!data || !areVoicePeersInSameChannel(socket.id, data.to, channelId)) {
       return;
     }
 
     io.to(data.to).emit('voice-ice-candidate', {
-      channelId: data.channelId,
+      channelId,
       from: socket.id,
       candidate: data.candidate
     });
@@ -857,7 +1376,27 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(port, () => {
-  console.log('Chat server running on http://localhost:3000');
-      console.log(`Web server listening on port ${port}`);
+db.connect((err) => {
+  if (err) {
+    console.log("Database connection failed");
+    console.log(err);
+    return;
+  }
+
+  console.log("Connected to MySQL");
+
+  initializeDatabase()
+    .then(() => {
+      console.log("Database tables ready");
+      server.listen(port, () => {
+        console.log('Chat server running on http://localhost:3000');
+        console.log(`Web server listening on port ${port}`);
+      });
+    })
+    .catch((tableErr) => {
+      console.log("Could not initialize database tables");
+      console.log(tableErr);
+      process.exitCode = 1;
+      db.end();
+    });
 });

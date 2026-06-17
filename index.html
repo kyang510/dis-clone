@@ -43,7 +43,7 @@
     <!-- Create Channel -->
     <div id="channel-modal" class="modal" style="display: none;">
       <div class="modal-content">
-        <h2>Create Channel</h2>
+        <h2 id="channel-modal-title">Create Channel</h2>
         <input type="text" id="channel-name-input" placeholder="# new-channel" maxlength="50" />
         <div class="modal-buttons">
           <button id="create-channel-cancel">Cancel</button>
@@ -56,7 +56,7 @@
     <!-- Create Voice Channel -->
     <div id="voice-channel-modal" class="modal" style="display: none;">
       <div class="modal-content">
-        <h2>Create Voice Channel</h2>
+        <h2 id="voice-channel-modal-title">Create Voice Channel</h2>
         <input type="text" id="voice-channel-name-input" placeholder="New Voice Chat" maxlength="50" />
         <div class="modal-buttons">
           <button id="create-voice-channel-cancel">Cancel</button>
@@ -64,6 +64,21 @@
 
         </div>
       </div>
+    </div>
+
+    <div id="channel-context-menu" class="channel-context-menu" hidden>
+      <button type="button" data-channel-action="create-text">Create Text Channel</button>
+      <button type="button" data-channel-action="create-voice">Create Voice Channel</button>
+      <div class="channel-context-divider"></div>
+      <button type="button" data-channel-action="edit">Edit Channel</button>
+      <button type="button" data-channel-action="duplicate">Duplicate Channel</button>
+      <button type="button" data-channel-action="delete" class="danger">Delete Channel</button>
+    </div>
+
+    <div id="message-context-menu" class="message-context-menu" hidden>
+      <button type="button" data-message-action="copy">Copy Message</button>
+      <button type="button" data-message-action="edit">Edit Message</button>
+      <button type="button" data-message-action="delete" class="danger">Delete Message</button>
     </div>
 
     <div class = "chat-area">
@@ -186,3 +201,4 @@
     <script src="renderer.js"></script>
   </body>
 </html>
+    <!-- use PASETO for authentication -->
