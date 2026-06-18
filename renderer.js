@@ -213,7 +213,7 @@ function openMessageContextMenu(event, message) {
   closeRemoteVolumeMenu();
 
   const userId = message && message.userId != null ? String(message.userId) : '';
-  const canModify = currentUserId != null && userId === String(currentUserId);
+  const canModify = true;
 
   activeMessageContext = {
     id: message && message.id,
@@ -299,22 +299,73 @@ function runMessageAction(action) {
   if (!context.canModify) return;
 
   if (action === 'edit') {
-    const nextMessage = prompt('Edit message', context.message);
-    if (nextMessage == null) return;
-
-    const trimmedMessage = nextMessage.trim();
-    if (!trimmedMessage || trimmedMessage === context.message) return;
-
-    window.chatAPI.editMessage({
-      messageId: context.id,
-      message: trimmedMessage
-    }, (res) => {
-      if (!res || !res.success) {
-        alert((res && res.error) || 'Could not edit message');
-      }
-    });
-    return;
+    startInlineEdit(context.id, context.message);
+      return;
   }
+
+function startInlineEdit(messageId, currentMessage) {
+  const messageEl = document.querySelector(`[data-message-id="${messageId}"]`);
+  if (!messageEl) return;
+
+  const textContainer = messageEl.querySelector('.text');
+  if (!textContainer) return;
+
+  textContainer.innerHTML = '';
+
+  const input = document.createElement('input');
+  input.className = 'message-edit-input';
+  input.value = currentMessage;
+
+  const hint = document.createElement('div');
+  hint.className = 'edit-hint';
+  hint.textContent = 'escape to cancel • enter to save';
+
+  textContainer.appendChild(input);
+  textContainer.appendChild(hint);
+
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      loadChannelMessages(currentChannelId);
+      return;
+    }
+
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const newMessage = input.value.trim();
+
+      if (!newMessage || newMessage === currentMessage) {
+        loadChannelMessages(currentChannelId);
+        return;
+      }
+
+      console.log('saving edit:', {
+        messageId,
+        message: newMessage
+      });
+
+      window.chatAPI.editMessage({
+        messageId,
+        message: newMessage
+      }, (res) => {
+        console.log('edit response:', res);
+
+        if (!res || !res.success) {
+          alert((res && res.error) || 'Could not edit message');
+          return;
+        }
+
+        loadChannelMessages(currentChannelId);
+      });
+    }
+  });
+}
 
   if (action === 'delete') {
     if (!confirm('Delete this message?')) return;

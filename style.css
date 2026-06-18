@@ -11,6 +11,10 @@
     --active-bg: #a3a3a3;
     --menu-bg: #18191c;
     --overlay-bg: #000000;
+    --edit-hint: #FFFFFF99;
+    --scrollbar-color: #FFFFFF99;
+    --message-time: #FFFFFF99;
+    --message-edited: #FFFFFF99;
 }
 
 body {
@@ -21,7 +25,7 @@ body {
 }
 
 * {
-    scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
+    scrollbar-color: var(--scrollbar-color) transparent;
     scrollbar-width: thin;
 }
 
@@ -35,14 +39,14 @@ body {
 }
 
 *::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.24);
+    background: var(--scrollbar-color);
     border: 2px solid transparent;
     border-radius: 999px;
     background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.42);
+    background: var(--scrollbar-color);
     border: 2px solid transparent;
     background-clip: padding-box;
 }
@@ -127,7 +131,7 @@ body {
 }
 
 .message-time {
-    color: rgba(255, 255, 255, 0.68);
+    color: var(--message-time);
     flex: 0 0 auto;
     font-size: 11px;
 }
@@ -139,9 +143,26 @@ body {
 }
 
 .message-placeholder .message-edited {
-    color: rgba(255, 255, 255, 0.58);
+    color: var(--message-edited);
     font-size: 11px;
     margin-left: 6px;
+}
+
+.message-edit-input {
+  width: 100%;
+  padding: 8px;
+  border: 2px solid #5865f2;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--chat-bg) 80%, white);
+  font-size: 14px;
+  color: white;
+  box-sizing: border-box;
+}
+
+.edit-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--edit-hint);
 }
 
 .input-area {
