@@ -213,7 +213,7 @@ function openMessageContextMenu(event, message) {
   closeRemoteVolumeMenu();
 
   const userId = message && message.userId != null ? String(message.userId) : '';
-  const canModify = true;
+  const canModify =   currentUserId != null && userId === String(currentUserId);
 
   activeMessageContext = {
     id: message && message.id,
