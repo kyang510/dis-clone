@@ -1,21 +1,40 @@
-const information = document.getElementById('info');
-information.innerText = `This app is using Chrome (v${window.versions.chrome()}), Node.js (v${window.versions.node()}), and Electron (v${window.versions.electron()})`;
-
-let message;
-
 const form = document.getElementById('form');
 const messageInput = document.getElementById('message');
 const messageArea = document.getElementById('messageArea');
 const databaseUsersContainer = document.getElementById('database-users');
+const uploadBtn = document.getElementById('upload-btn');
+const mediaUploadInput = document.getElementById('media-upload');
+const selectedAttachment = document.getElementById('selected-attachment');
+const selectedAttachmentName = document.getElementById('selected-attachment-name');
+const clearAttachmentBtn = document.getElementById('clear-attachment');
 
 let currentChannelId = 1;
 let currentUserId = null;
-let currentUsername = 'anonymous';
 let textChannels = [];
 const DEFAULT_CHANNEL_ID = 1;
 const MAX_VISIBLE_MESSAGES = 100;
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const allowedAttachmentTypes = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'video/mp4',
+  'audio/mpeg',
+  'audio/mp3'
+]);
+const attachmentTypeByExtension = new Map([
+  ['jpg', 'image/jpeg'],
+  ['jpeg', 'image/jpeg'],
+  ['png', 'image/png'],
+  ['webp', 'image/webp'],
+  ['gif', 'image/gif'],
+  ['mp4', 'video/mp4'],
+  ['mp3', 'audio/mpeg']
+]);
 let messageLoadRequestId = 0;
 let isLoadingMessages = false;
+let isSendingMessage = false;
 let queuedLiveMessages = [];
 let renderedMessageIds = new Set();
 
@@ -59,7 +78,6 @@ function updateAuthControls() {
 
 function applyAuthenticatedUser(user) {
   currentUserId = user && user.id;
-  currentUsername = (user && user.username) || 'anonymous';
   updateAuthControls();
   renderVoiceChannels();
   loadDatabaseUsers();
@@ -68,7 +86,6 @@ function applyAuthenticatedUser(user) {
 
 function clearAuthenticatedUser() {
   currentUserId = null;
-  currentUsername = 'anonymous';
   messageArea.innerHTML = '';
   databaseUsersContainer.innerHTML = '';
   resetRenderedMessageIds();
@@ -211,15 +228,17 @@ function openMessageContextMenu(event, message) {
 
   closeChannelContextMenu();
   closeRemoteVolumeMenu();
-
+  // checks if the current user is the author of the message
   const userId = message && message.userId != null ? String(message.userId) : '';
-  const canModify =   currentUserId != null && userId === String(currentUserId);
-
+  const canModify = currentUserId != null && userId === String(currentUserId);
+  // displays the edit and delete
   activeMessageContext = {
     id: message && message.id,
     channelId: message && message.channelId,
     userId: message && message.userId,
     message: (message && message.message) || '',
+    attachment: (message && message.attachment) || null,
+    hasAttachment: Boolean(message && message.attachment),
     canModify
   };
 
@@ -292,18 +311,18 @@ function runMessageAction(action) {
   if (!context || !context.id) return;
 
   if (action === 'copy') {
-    window.chatAPI.copyText(context.message);
+    window.chatAPI.copyText(context.message || (context.attachment && context.attachment.name) || '');
     return;
   }
 
   if (!context.canModify) return;
 
   if (action === 'edit') {
-    startInlineEdit(context.id, context.message);
+    startInlineEdit(context.id, context.message, context.hasAttachment);
       return;
   }
 
-function startInlineEdit(messageId, currentMessage) {
+function startInlineEdit(messageId, currentMessage, hasAttachment = false) {
   const messageEl = document.querySelector(`[data-message-id="${messageId}"]`);
   if (!messageEl) return;
 
@@ -340,7 +359,7 @@ function startInlineEdit(messageId, currentMessage) {
 
       const newMessage = input.value.trim();
 
-      if (!newMessage || newMessage === currentMessage) {
+      if ((!newMessage && !hasAttachment) || newMessage === currentMessage) {
         loadChannelMessages(currentChannelId);
         return;
       }
@@ -479,9 +498,161 @@ function getMessageText(data) {
   return String((data && (data.message || data.body)) || '');
 }
 
+function getFileExtension(fileName) {
+  const parts = String(fileName || '').toLowerCase().split('.');
+  return parts.length > 1 ? parts.pop() : '';
+}
+
+function getAttachmentType(file) {
+  const type = String((file && file.type) || '').toLowerCase();
+
+  if (allowedAttachmentTypes.has(type)) {
+    return type === 'audio/mp3' ? 'audio/mpeg' : type;
+  }
+
+  return attachmentTypeByExtension.get(getFileExtension(file && file.name)) || '';
+}
+
+function validateAttachmentFile(file) {
+  if (!file) {
+    return 'Choose a file to upload';
+  }
+
+  if (!getAttachmentType(file)) {
+    return 'Only images, GIFs, MP4, and MP3 files are allowed';
+  }
+
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    return 'Attachment is too large';
+  }
+
+  return '';
+}
+
+function formatAttachmentSize(size) {
+  const bytes = Number(size) || 0;
+
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function updateSelectedAttachment() {
+  const file = mediaUploadInput && mediaUploadInput.files && mediaUploadInput.files[0];
+
+  if (!selectedAttachment || !selectedAttachmentName) return;
+
+  if (!file) {
+    selectedAttachment.hidden = true;
+    selectedAttachmentName.textContent = '';
+    return;
+  }
+
+  selectedAttachment.hidden = false;
+  selectedAttachmentName.textContent = `${file.name} (${formatAttachmentSize(file.size)})`;
+}
+
+function clearAttachmentSelection() {
+  if (mediaUploadInput) {
+    mediaUploadInput.value = '';
+  }
+
+  updateSelectedAttachment();
+}
+
+async function buildAttachmentPayload(file) {
+  const error = validateAttachmentFile(file);
+
+  if (error) {
+    throw new Error(error);
+  }
+
+  return {
+    name: file.name,
+    type: getAttachmentType(file),
+    size: file.size,
+    data: await file.arrayBuffer()
+  };
+}
+
+function getMessageAttachment(data) {
+  const attachment = data && data.attachment;
+
+  if (!attachment || !attachment.data || !(attachment.type || attachment.mime)) {
+    return null;
+  }
+
+  return {
+    name: attachment.name || 'attachment',
+    type: attachment.type || attachment.mime,
+    size: attachment.size || 0,
+    data: attachment.data
+  };
+}
+
+function createAttachmentElement(attachment) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'message-attachment';
+
+  const name = document.createElement('div');
+  name.className = 'message-attachment-name';
+  name.textContent = `${attachment.name} (${formatAttachmentSize(attachment.size)})`;
+  wrapper.appendChild(name);
+
+  const source = `data:${attachment.type};base64,${attachment.data}`;
+  let mediaEl;
+
+  if (attachment.type.startsWith('image/')) {
+    mediaEl = document.createElement('img');
+    mediaEl.alt = attachment.name;
+  } else if (attachment.type === 'video/mp4') {
+    mediaEl = document.createElement('video');
+    mediaEl.controls = true;
+    mediaEl.preload = 'metadata';
+  } else if (attachment.type === 'audio/mpeg' || attachment.type === 'audio/mp3') {
+    mediaEl = document.createElement('audio');
+    mediaEl.controls = true;
+    mediaEl.preload = 'metadata';
+  }
+
+  if (mediaEl) {
+    mediaEl.src = source;
+    wrapper.appendChild(mediaEl);
+  }
+
+  return wrapper;
+}
+
+function renderMessageContent(textContainer, data) {
+  const messageText = getMessageText(data);
+  const attachment = getMessageAttachment(data);
+
+  textContainer.innerHTML = '';
+
+  if (messageText) {
+    const messageTextSpan = document.createElement('span');
+    messageTextSpan.className = 'message-text';
+    messageTextSpan.textContent = messageText;
+    textContainer.appendChild(messageTextSpan);
+  }
+
+  if (attachment) {
+    textContainer.appendChild(createAttachmentElement(attachment));
+  }
+
+  const editedSpan = document.createElement('span');
+  editedSpan.className = 'message-edited';
+  editedSpan.textContent = 'edited';
+  editedSpan.hidden = !hasEditedMarker(data);
+  textContainer.appendChild(editedSpan);
+}
+
 function appendChatMessage(data) {
   const messageText = getMessageText(data);
-  if (!messageText) return;
+  const attachment = getMessageAttachment(data);
+  if (!messageText && !attachment) return;
 
   const messageId = getMessageId(data);
 
@@ -519,18 +690,7 @@ function appendChatMessage(data) {
 
   const textSpan = document.createElement('div');
   textSpan.className = 'text';
-
-  const messageTextSpan = document.createElement('span');
-  messageTextSpan.className = 'message-text';
-  messageTextSpan.textContent = messageText;
-
-  const editedSpan = document.createElement('span');
-  editedSpan.className = 'message-edited';
-  editedSpan.textContent = 'edited';
-  editedSpan.hidden = !hasEditedMarker(data);
-
-  textSpan.appendChild(messageTextSpan);
-  textSpan.appendChild(editedSpan);
+  renderMessageContent(textSpan, data);
 
   headerDiv.appendChild(usernameSpan);
   headerDiv.appendChild(timeSpan);
@@ -540,7 +700,8 @@ function appendChatMessage(data) {
     id: messageId,
     channelId,
     userId,
-    message: messageText
+    message: messageText,
+    attachment
   });
   messageArea.appendChild(messageDiv);
   trimVisibleMessages();
@@ -555,15 +716,11 @@ function updateRenderedMessage(data) {
   if (!messageEl) return;
 
   const messageText = getMessageText(data);
-  const messageTextEl = messageEl.querySelector('.message-text');
-  const editedEl = messageEl.querySelector('.message-edited');
+  const textContainer = messageEl.querySelector('.text');
+  const attachment = getMessageAttachment(data);
 
-  if (messageTextEl) {
-    messageTextEl.textContent = messageText;
-  }
-
-  if (editedEl) {
-    editedEl.hidden = !hasEditedMarker(data);
+  if (textContainer) {
+    renderMessageContent(textContainer, data);
   }
 
   messageEl.dataset.messageText = messageText;
@@ -571,7 +728,8 @@ function updateRenderedMessage(data) {
     id: messageId,
     channelId: getMessageChannelId(data),
     userId: data && data.userId,
-    message: messageText
+    message: messageText,
+    attachment
   });
 }
 
@@ -672,28 +830,70 @@ function renderChannels(data) {
 
 window.chatAPI.onNewChannel(renderChannels);
 
-form.addEventListener('submit', (e) => {
+uploadBtn.addEventListener('click', () => {
+  mediaUploadInput.click();
+});
+
+clearAttachmentBtn.addEventListener('click', clearAttachmentSelection);
+
+mediaUploadInput.addEventListener('change', () => {
+  const file = mediaUploadInput.files && mediaUploadInput.files[0];
+  const error = file ? validateAttachmentFile(file) : '';
+
+  if (error) {
+    alert(error);
+    clearAttachmentSelection();
+    return;
+  }
+
+  updateSelectedAttachment();
+});
+
+form.addEventListener('submit', async (e) => {
   e.preventDefault();
 
+  if (isSendingMessage) return;
+
   const messageText = messageInput.value.trim();
-  if (!messageText) return;
+  const file = mediaUploadInput.files && mediaUploadInput.files[0];
+  if (!messageText && !file) return;
 
   if (!currentUserId) {
     alert('Log in before sending messages');
     return;
   }
 
+  let attachment = null;
+
+  try {
+    isSendingMessage = true;
+
+    if (file) {
+      attachment = await buildAttachmentPayload(file);
+    }
+  } catch (err) {
+    isSendingMessage = false;
+    alert(err.message || 'Could not read attachment');
+    return;
+  }
+
   window.chatAPI.sendMessage({
     message: messageText,
-    channelId: currentChannelId
+    channelId: currentChannelId,
+    attachment
   }, (res) => {
+    isSendingMessage = false;
+
     if (!res || !res.success) {
       console.log((res && res.error) || 'Message could not be sent');
       messageInput.value = messageText;
+      alert((res && res.error) || 'Message could not be sent');
+      return;
     }
-  });
 
-  messageInput.value = '';
+    messageInput.value = '';
+    clearAttachmentSelection();
+  });
 });
 
 
@@ -759,6 +959,7 @@ const appearanceSettings = [
   {key: 'channelListBg', label: 'Channels', cssVar: '--channel-list-bg', defaultColor: '#9C7E7E'},
   {key: 'chatBg', label: 'Chat', cssVar: '--chat-bg', defaultColor: '#928989'},
   {key: 'usersBg', label: 'Users', cssVar: '--users-bg', defaultColor: '#C9C7C7'},
+  {key: 'borderColor', label: 'Border', cssVar: '--border-color', defaultColor: '#ccc'},
   {key: 'surfaceBg', label: 'Voice/Settings Panel', cssVar: '--surface-bg', defaultColor: '#36393F'},
   {key: 'inputBg', label: 'Inputs', cssVar: '--input-bg', defaultColor: '#222222'},
   {key: 'buttonBg', label: 'Buttons', cssVar: '--button-bg', defaultColor: '#575757'},
@@ -788,6 +989,8 @@ let activeRemoteVolumeSocketId = null;
 let localVoiceActivityDetector = null;
 let voiceChannelModalMode = 'create';
 let editingVoiceChannelId = null;
+
+let selectedFile = null;
 
 voiceModal.style.display = 'none';
 voiceSettingsModal.style.display = 'none';

@@ -15,6 +15,9 @@
     --scrollbar-color: #FFFFFF99;
     --message-time: #FFFFFF99;
     --message-edited: #FFFFFF99;
+    --chat-color: #FFFFFF;
+    --username-placeholder: #FFFFFF;
+    --border-color: #ccc;
 }
 
 body {
@@ -55,6 +58,27 @@ body {
     background: transparent;
 }
 
+.directory-1 {
+  width: 80px;
+  background-color: var(--directory-bg);
+  position: fixed;
+  z-index: -1;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh);
+}
+
+.channel-list-1 {
+    width: 140px;
+    background-color: var(--channel-list-bg);
+    border: 1px solid color-mix(in srgb, var(--border-color) 40%, transparent );
+    position: fixed;
+    z-index: -1;
+    padding: 10px;
+    height: calc(100vh);
+    left: 80px;
+}
+
 .directory {
     width: 80px;
     background-color: var(--directory-bg);
@@ -63,7 +87,7 @@ body {
     align-items: center;
     padding: 10px 0;
     overflow-y: auto;
-
+    height: calc(100vh - 120px);
 }
 
 .directory img {
@@ -75,10 +99,14 @@ body {
 
 .channel-list {
     width: 140px;
-    justify-content: center;
     background-color: var(--channel-list-bg);
     padding: 10px;
     overflow-y: auto;
+    border: 1px solid color-mix(in srgb, var(--border-color) 40%, transparent );
+    border-top: none;
+    border-bottom: none;
+    height: calc(100vh - 120px);
+    flex: 1;
 }
 
 .channel-list h1 {
@@ -97,14 +125,10 @@ body {
     overflow-y: auto;
 }
 
-.chat-area h1 {
-    color: white;
-    font-family: Arial, Helvetica, sans-serif;
-}
-
-.chat-area p {
-    color: white;
-    font-family: Arial, Helvetica, sans-serif;
+.left-sidebar {
+  display: flex;
+  height: 100vh;
+  position: relative;
 }
 
 .messages {
@@ -113,7 +137,7 @@ body {
 }
 
 .message-placeholder {
-    color: white;
+    color: var(--chat-color);
     font-family: Arial, Helvetica, sans-serif;
     margin-bottom: 12px;
 }
@@ -126,6 +150,7 @@ body {
 }
 
 .username-placeholder {
+    color: var(--username-placeholder);
     font-weight: bold;
     overflow-wrap: anywhere;
 }
@@ -148,6 +173,32 @@ body {
     margin-left: 6px;
 }
 
+.message-attachment {
+    margin-top: 6px;
+    max-width: min(420px, 100%);
+}
+
+.message-attachment-name {
+    color: var(--message-time);
+    font-size: 12px;
+    margin-bottom: 4px;
+    overflow-wrap: anywhere;
+}
+
+.message-attachment img,
+.message-attachment video {
+    border-radius: 4px;
+    display: block;
+    max-height: 320px;
+    max-width: 100%;
+}
+
+.message-attachment audio {
+    display: block;
+    max-width: 100%;
+    width: 320px;
+}
+
 .message-edit-input {
   width: 100%;
   padding: 8px;
@@ -168,6 +219,8 @@ body {
 .input-area {
     margin-top: auto;
     display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .chat-area input {
@@ -177,11 +230,64 @@ body {
     border: none;
 }
 
+.upload-btn,
+#clear-attachment {
+    background: var(--button-bg);
+    border: none;
+    border-radius: 4px;
+    color: white;
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+
+.upload-btn {
+    height: 36px;
+    width: 36px;
+}
+
+.upload-btn:hover,
+#clear-attachment:hover {
+    background: var(--button-hover-bg);
+}
+
+.selected-attachment {
+    align-items: center;
+    background: color-mix(in srgb, var(--surface-bg) 82%, white);
+    border-radius: 4px;
+    color: white;
+    display: flex;
+    flex: 0 1 220px;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 12px;
+    gap: 6px;
+    min-width: 0;
+    padding: 6px;
+}
+
+.selected-attachment[hidden] {
+    display: none;
+}
+
+#selected-attachment-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#clear-attachment {
+    height: 22px;
+    width: 22px;
+}
+
 .users-list {
     width: 180px;
     background-color: var(--users-bg);
     padding: 10px;
     overflow-y: auto;
+    border: 1px solid color-mix(in srgb, var(--border-color) 40%, transparent );
+    border-top:none;
+    border-bottom: none;
+    border-right: none;
 }
 
 .database-user {
@@ -210,10 +316,6 @@ body {
     transition: background-color 0.3s, color 0.3s;
 }
 
-.hover-add {
-    display: none;
-}
-
 h1 {
     margin: 0;
 }
@@ -224,7 +326,7 @@ h1 {
     align-items: center;
 }
 /* create channels pop out*/
-.modal,.modal-sin {
+.modal {
   position: fixed;
   top: 0;
   left: 0;
@@ -238,7 +340,7 @@ h1 {
   z-index: 1000;
 }
 
-.modal-content, .modal-sin-content {
+.modal-content {
   background: var(--surface-bg);
   padding: 20px;
   border-radius: 8px;
@@ -247,12 +349,12 @@ h1 {
   color: white;
 }
 
-.modal-content h2, .modal-sin-content h2 {
+.modal-content h2 {
   margin: 0 0 15px 0;
   font-family: Arial, Helvetica, sans-serif;
 }
 
-.modal-content input, .modal-sin-content input {
+.modal-content input {
   width: 80%;
   padding: 10px;
   border-radius: 5px;
@@ -262,13 +364,13 @@ h1 {
   color: white;
 }
 
-.modal-buttons, .modal-sin-buttons {
+.modal-buttons {
   display: flex;
   gap: 10px;
   justify-content: center;
 }
 
-.modal-buttons button, .modal-sin-buttons button {
+.modal-buttons button {
   flex: 1;
   padding: 8px 16px;
   border: none;
@@ -458,7 +560,7 @@ h1 {
   gap: 8px;
   justify-content: flex-start;
   padding: 10px;
-  position: fixed;
+  position: absolute;
   left: 10px;
   width: min(220px, calc(100vw - 20px));
   z-index: 900;

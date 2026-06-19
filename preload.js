@@ -1,20 +1,11 @@
 const { contextBridge, ipcRenderer, clipboard } = require('electron')
 
-contextBridge.exposeInMainWorld('versions', {
-  node: () => process.versions.node,
-  chrome: () => process.versions.chrome,
-  electron: () => process.versions.electron
-})
-
 const io = require('socket.io-client');
 
 const API_URL = 'http://localhost:3000';
 const SOCKET_CONNECT_TIMEOUT_MS = 5000;
-const TOKEN_REFRESH_SKEW_MS = 30 * 1000;
 
-let accessToken = null;
-let accessTokenExpiresAt = 0;
-let refreshToken = null;
+let sessionToken = null;
 let currentUser = null;
 
 const socket = io(API_URL, {
@@ -48,8 +39,8 @@ async function apiRequest(path, options = {}) {
   };
 
   if (options.auth) {
-    await ensureAccessToken();
-    headers.Authorization = `Bearer ${accessToken}`;
+    await ensureSessionToken();
+    headers.Authorization = `Bearer ${sessionToken}`;
   }
 
   const response = await fetch(`${API_URL}${path}`, {
@@ -58,16 +49,11 @@ async function apiRequest(path, options = {}) {
     body: options.body ? JSON.stringify(options.body) : undefined
   });
 
-  if (response.status === 401 && options.auth && !options.didRefresh) {
-    await refreshSession();
-    return apiRequest(path, {...options, didRefresh: true});
-  }
-
   return parseApiResponse(response);
 }
 
-async function storeRefreshToken(token) {
-  refreshToken = token;
+async function storeSessionToken(token) {
+  sessionToken = token;
 
   try {
     await ipcRenderer.invoke('session-token:set', token);
@@ -76,17 +62,17 @@ async function storeRefreshToken(token) {
   }
 }
 
-async function readStoredRefreshToken() {
-  if (refreshToken) {
-    return refreshToken;
+async function readStoredSessionToken() {
+  if (sessionToken) {
+    return sessionToken;
   }
 
-  refreshToken = await ipcRenderer.invoke('session-token:get');
-  return refreshToken;
+  sessionToken = await ipcRenderer.invoke('session-token:get');
+  return sessionToken;
 }
 
-async function clearStoredRefreshToken() {
-  refreshToken = null;
+async function clearStoredSessionToken() {
+  sessionToken = null;
 
   try {
     await ipcRenderer.invoke('session-token:clear');
@@ -96,20 +82,18 @@ async function clearStoredRefreshToken() {
 }
 
 async function applyAuthPayload(data) {
-  if (!data || !data.accessToken || !data.refreshToken || !data.user) {
+  if (!data || !data.sessionToken || !data.user) {
     throw new Error('Invalid authentication response');
   }
 
-  const previousAccessToken = accessToken;
-  accessToken = data.accessToken;
-  accessTokenExpiresAt = Date.parse(data.accessTokenExpiresAt) || 0;
+  const previousSessionToken = sessionToken;
   currentUser = data.user;
 
-  await storeRefreshToken(data.refreshToken);
+  await storeSessionToken(data.sessionToken);
 
-  socket.auth = {token: accessToken};
+  socket.auth = {token: sessionToken};
 
-  if (socket.connected && previousAccessToken && previousAccessToken !== accessToken) {
+  if (socket.connected && previousSessionToken && previousSessionToken !== sessionToken) {
     socket.disconnect();
     socket.connect();
   }
@@ -121,33 +105,14 @@ async function applyAuthPayload(data) {
   };
 }
 
-async function refreshSession() {
-  const token = await readStoredRefreshToken();
+async function ensureSessionToken() {
+  const token = await readStoredSessionToken();
 
   if (!token) {
     throw new Error('Log in to continue');
   }
 
-  try {
-    const data = await apiRequest('/auth/refresh', {
-      method: 'POST',
-      body: {refreshToken: token}
-    });
-
-    return applyAuthPayload(data);
-  } catch (err) {
-    await clearSession();
-    throw err;
-  }
-}
-
-async function ensureAccessToken() {
-  if (accessToken && Date.now() < accessTokenExpiresAt - TOKEN_REFRESH_SKEW_MS) {
-    return accessToken;
-  }
-
-  await refreshSession();
-  return accessToken;
+  return token;
 }
 
 function waitForSocketConnection() {
@@ -183,8 +148,8 @@ function waitForSocketConnection() {
 }
 
 async function ensureSocketConnected(shouldRetry = true) {
-  await ensureAccessToken();
-  socket.auth = {token: accessToken};
+  await ensureSessionToken();
+  socket.auth = {token: sessionToken};
 
   if (!socket.connected) {
     socket.connect();
@@ -194,7 +159,7 @@ async function ensureSocketConnected(shouldRetry = true) {
     await waitForSocketConnection();
   } catch (err) {
     if (shouldRetry) {
-      await refreshSession();
+      socket.disconnect();
       return ensureSocketConnected(false);
     }
 
@@ -205,14 +170,11 @@ async function ensureSocketConnected(shouldRetry = true) {
 function emitWithAuth(eventName, args, callback, shouldRetry = true) {
   ensureSocketConnected()
     .then(() => {
-      socket.emit(eventName, ...args, async (res) => {
+      socket.emit(eventName, ...args, (res) => {
         if (res && !res.success && res.error === 'Session expired' && shouldRetry) {
-          try {
-            await refreshSession();
-            emitWithAuth(eventName, args, callback, false);
-          } catch (err) {
-            if (typeof callback === 'function') callback(getAuthError(err));
-          }
+          clearSession().finally(() => {
+            if (typeof callback === 'function') callback(getAuthError(new Error(res.error)));
+          });
           return;
         }
 
@@ -231,15 +193,13 @@ function emitWithoutAck(eventName, data) {
 }
 
 async function clearSession() {
-  accessToken = null;
-  accessTokenExpiresAt = 0;
   currentUser = null;
 
   if (socket.connected) {
     socket.disconnect();
   }
 
-  await clearStoredRefreshToken();
+  await clearStoredSessionToken();
 }
 
 async function login(credentials) {
@@ -270,25 +230,24 @@ async function signup(account) {
 
 async function restoreSession() {
   try {
-    await readStoredRefreshToken();
-    const result = await refreshSession();
+    await ensureSessionToken();
+    const data = await apiRequest('/me', {auth: true});
+    currentUser = data.user;
+    socket.auth = {token: sessionToken};
     await ensureSocketConnected();
-    return result;
+    return {success: true, user: currentUser};
   } catch (err) {
+    await clearSession();
     return getAuthError(err);
   }
 }
 
 async function logout() {
-  const token = refreshToken;
-
   try {
-    if (token) {
-      await apiRequest('/logout', {
-        method: 'POST',
-        body: {refreshToken: token}
-      });
-    }
+    await apiRequest('/logout', {
+      method: 'POST',
+      auth: true
+    });
   } catch (err) {
     console.log(err);
   }
@@ -312,10 +271,10 @@ contextBridge.exposeInMainWorld('chatAPI', {
   logout,
   restoreSession,
   getUsers,
-  getCurrentUser: () => currentUser,
   sendMessage: (data, callback) => emitWithAuth('chat message', [{
     message: data && data.message,
-    channelId: data && data.channelId
+    channelId: data && data.channelId,
+    attachment: data && data.attachment
   }], callback),
   loadMessages: (channelId, callback) => emitWithAuth('load messages', [{channelId}], callback),
   onMessage: (callback) => socket.on('chat message', callback),

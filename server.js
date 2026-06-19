@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const crypto = require('node:crypto');
+const path = require('path');
 
 function isAllowedOrigin(origin) {
   return !origin || origin === 'null' || origin.startsWith('file://') || origin === 'http://localhost:3000';
@@ -10,6 +11,7 @@ function isAllowedOrigin(origin) {
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
+  maxHttpBufferSize: 40 * 1024 * 1024,
   cors: {
     origin: (origin, callback) => callback(null, isAllowedOrigin(origin))
   }
@@ -17,11 +19,39 @@ const io = new Server(server, {
 const port = 3000;
 const DEFAULT_CHANNEL_ID = 1;
 const MESSAGE_HISTORY_LIMIT = 100;
-const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
-const REFRESH_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
-const JWT_ISSUER = 'dis-clone';
-const JWT_AUDIENCE = 'dis-clone-client';
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const SESSION_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
+const allowedAttachmentMimeTypes = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'video/mp4',
+  'audio/mpeg',
+  'audio/mp3'
+]);
+const attachmentMimeByExtension = new Map([
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.png', 'image/png'],
+  ['.webp', 'image/webp'],
+  ['.gif', 'image/gif'],
+  ['.mp4', 'video/mp4'],
+  ['.mp3', 'audio/mpeg']
+]);
+const MESSAGE_SELECT_COLUMNS = [
+  'id',
+  'channel_id',
+  'user_id',
+  'username',
+  'body',
+  'attachment_name',
+  'attachment_mime',
+  'attachment_size',
+  'attachment_data',
+  'created_at',
+  'edited_at'
+].join(', ');
 const DEFAULT_CHANNELS = [
   {id: 1, name: 'general'},
   {id: 2, name: 'memes'},
@@ -35,17 +65,27 @@ const DEFAULT_VOICE_CHANNELS = [
   {id: 4, name: 'music'}
 ];
 
-if (!process.env.JWT_SECRET) {
-  console.warn('JWT_SECRET is not set. Using a one-time development secret; sessions will expire when the server restarts.');
-}
-
-const cors = require("cors");
 const bcrypt = require("bcrypt");
 const mysql = require('mysql2');
 
-app.use(cors({
-  origin: (origin, callback) => callback(null, isAllowedOrigin(origin))
-}));
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+
+  if (isAllowedOrigin(origin) && origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(204);
+    return;
+  }
+
+  next();
+});
 app.use(express.json());
 
 
@@ -134,6 +174,16 @@ async function ensureVoiceChannelsTable() {
   `);
 }
 
+async function addColumnIfMissing(tableName, columnName, columnDefinition) {
+  try {
+    await dbQuery(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`);
+  } catch (err) {
+    if (!err || err.code !== 'ER_DUP_FIELDNAME') {
+      throw err;
+    }
+  }
+}
+
 async function ensureMessagesTable() {
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS messages (
@@ -142,6 +192,10 @@ async function ensureMessagesTable() {
       user_id INT NOT NULL,
       username VARCHAR(50) NOT NULL,
       body TEXT NOT NULL,
+      attachment_name VARCHAR(255) NULL,
+      attachment_mime VARCHAR(100) NULL,
+      attachment_size INT UNSIGNED NULL,
+      attachment_data LONGBLOB NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       edited_at TIMESTAMP NULL,
       INDEX idx_messages_channel_id_id (channel_id, id),
@@ -151,13 +205,11 @@ async function ensureMessagesTable() {
     )
   `);
 
-  try {
-    await dbQuery("ALTER TABLE messages ADD COLUMN edited_at TIMESTAMP NULL");
-  } catch (err) {
-    if (!err || err.code !== 'ER_DUP_FIELDNAME') {
-      throw err;
-    }
-  }
+  await addColumnIfMissing('messages', 'edited_at', 'TIMESTAMP NULL');
+  await addColumnIfMissing('messages', 'attachment_name', 'VARCHAR(255) NULL');
+  await addColumnIfMissing('messages', 'attachment_mime', 'VARCHAR(100) NULL');
+  await addColumnIfMissing('messages', 'attachment_size', 'INT UNSIGNED NULL');
+  await addColumnIfMissing('messages', 'attachment_data', 'LONGBLOB NULL');
 }
 
 async function seedDefaultChannels(tableName, defaults) {
@@ -201,84 +253,6 @@ async function initializeDatabase() {
   await loadChannelCaches();
 }
 
-function base64UrlEncode(value) {
-  return Buffer.from(value).toString('base64url');
-}
-
-function base64UrlJson(value) {
-  return base64UrlEncode(JSON.stringify(value));
-}
-
-function signJwt(payload, ttlSeconds) {
-  const now = Math.floor(Date.now() / 1000);
-  const jwtPayload = {
-    iss: JWT_ISSUER,
-    aud: JWT_AUDIENCE,
-    iat: now,
-    exp: now + ttlSeconds,
-    ...payload
-  };
-  const header = base64UrlJson({alg: 'HS256', typ: 'JWT'});
-  const body = base64UrlJson(jwtPayload);
-  const signingInput = `${header}.${body}`;
-  const signature = crypto
-    .createHmac('sha256', JWT_SECRET)
-    .update(signingInput)
-    .digest('base64url');
-
-  return `${signingInput}.${signature}`;
-}
-
-function verifyJwt(token, expectedType) {
-  if (!token || typeof token !== 'string') {
-    throw new Error('Missing token');
-  }
-
-  const parts = token.split('.');
-  if (parts.length !== 3) {
-    throw new Error('Invalid token');
-  }
-
-  const [encodedHeader, encodedPayload, signature] = parts;
-  const header = JSON.parse(Buffer.from(encodedHeader, 'base64url').toString('utf8'));
-
-  if (header.alg !== 'HS256' || header.typ !== 'JWT') {
-    throw new Error('Invalid token header');
-  }
-
-  const signingInput = `${encodedHeader}.${encodedPayload}`;
-  const expectedSignature = crypto
-    .createHmac('sha256', JWT_SECRET)
-    .update(signingInput)
-    .digest('base64url');
-  const receivedSignatureBuffer = Buffer.from(signature, 'base64url');
-  const expectedSignatureBuffer = Buffer.from(expectedSignature, 'base64url');
-
-  if (
-    receivedSignatureBuffer.length !== expectedSignatureBuffer.length ||
-    !crypto.timingSafeEqual(receivedSignatureBuffer, expectedSignatureBuffer)
-  ) {
-    throw new Error('Invalid token signature');
-  }
-
-  const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
-  const now = Math.floor(Date.now() / 1000);
-
-  if (payload.iss !== JWT_ISSUER || payload.aud !== JWT_AUDIENCE) {
-    throw new Error('Invalid token audience');
-  }
-
-  if (payload.exp <= now) {
-    throw new Error('Token expired');
-  }
-
-  if (expectedType && payload.typ !== expectedType) {
-    throw new Error('Invalid token type');
-  }
-
-  return payload;
-}
-
 function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
@@ -309,131 +283,64 @@ function publicUser(user) {
   };
 }
 
-function createAccessToken(user, sessionId) {
-  const accessToken = signJwt({
-    typ: 'access',
-    sub: String(user.id),
-    sid: sessionId,
-    username: user.username
-  }, ACCESS_TOKEN_TTL_SECONDS);
-
-  return {
-    accessToken,
-    accessTokenExpiresAt: new Date(Date.now() + ACCESS_TOKEN_TTL_SECONDS * 1000).toISOString()
-  };
-}
-
-function createRefreshToken(user, sessionId) {
-  const refreshToken = signJwt({
-    typ: 'refresh',
-    sub: String(user.id),
-    sid: sessionId,
-    jti: crypto.randomUUID()
-  }, REFRESH_TOKEN_TTL_SECONDS);
-
-  return {
-    refreshToken,
-    refreshTokenExpiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_SECONDS * 1000)
-  };
-}
-
 async function createAuthSession(user, userAgent) {
   const sessionId = crypto.randomUUID();
-  const access = createAccessToken(user, sessionId);
-  const refresh = createRefreshToken(user, sessionId);
+  const sessionToken = crypto.randomBytes(32).toString('base64url');
+  const sessionExpiresAt = new Date(Date.now() + SESSION_TOKEN_TTL_SECONDS * 1000);
 
   await dbQuery(
     "INSERT INTO sessions (id, user_id, refresh_token_hash, user_agent, expires_at) VALUES (?, ?, ?, ?, ?)",
     [
       sessionId,
       user.id,
-      hashToken(refresh.refreshToken),
+      hashToken(sessionToken),
       String(userAgent || '').slice(0, 255),
-      toMysqlDate(refresh.refreshTokenExpiresAt)
+      toMysqlDate(sessionExpiresAt)
     ]
   );
 
   return {
-    ...access,
-    refreshToken: refresh.refreshToken,
+    sessionToken,
     user: publicUser(user)
   };
 }
 
-async function getActiveSession(sessionId) {
+async function getUserFromSessionToken(token) {
   const rows = await dbQuery(
-    `SELECT sessions.id, sessions.user_id, sessions.refresh_token_hash, users.username
+    `SELECT sessions.id, sessions.user_id, users.username
      FROM sessions
      INNER JOIN users ON users.id = sessions.user_id
-     WHERE sessions.id = ?
+     WHERE sessions.refresh_token_hash = ?
        AND sessions.revoked_at IS NULL
        AND sessions.expires_at > UTC_TIMESTAMP()
      LIMIT 1`,
-    [sessionId]
+    [hashToken(token)]
   );
+  const session = rows[0];
 
-  return rows[0] || null;
-}
-
-async function getUserFromAccessToken(token) {
-  const payload = verifyJwt(token, 'access');
-  const session = await getActiveSession(payload.sid);
-
-  if (!session || String(session.user_id) !== String(payload.sub)) {
+  if (!session) {
     throw new Error('Invalid session');
   }
+
+  await dbQuery("UPDATE sessions SET last_used_at = UTC_TIMESTAMP() WHERE id = ?", [session.id]);
 
   return {
     id: session.user_id,
     username: session.username,
-    sessionId: session.id,
-    tokenExpiresAt: payload.exp * 1000
+    sessionId: session.id
   };
 }
 
-async function rotateRefreshSession(refreshToken) {
-  const payload = verifyJwt(refreshToken, 'refresh');
-  const session = await getActiveSession(payload.sid);
-
-  if (!session || String(session.user_id) !== String(payload.sub)) {
-    throw new Error('Invalid session');
-  }
-
-  if (session.refresh_token_hash !== hashToken(refreshToken)) {
-    await dbQuery("UPDATE sessions SET revoked_at = UTC_TIMESTAMP() WHERE id = ?", [session.id]);
-    throw new Error('Invalid refresh token');
-  }
-
-  const user = {
-    id: session.user_id,
-    username: session.username
-  };
-  const access = createAccessToken(user, session.id);
-  const refresh = createRefreshToken(user, session.id);
-
+async function revokeAuthSession(sessionToken) {
   await dbQuery(
-    "UPDATE sessions SET refresh_token_hash = ?, last_used_at = UTC_TIMESTAMP(), expires_at = ? WHERE id = ?",
-    [hashToken(refresh.refreshToken), toMysqlDate(refresh.refreshTokenExpiresAt), session.id]
-  );
-
-  return {
-    ...access,
-    refreshToken: refresh.refreshToken,
-    user: publicUser(user)
-  };
-}
-
-async function revokeRefreshSession(refreshToken) {
-  const payload = verifyJwt(refreshToken, 'refresh');
-  await dbQuery(
-    "UPDATE sessions SET revoked_at = UTC_TIMESTAMP() WHERE id = ? AND user_id = ?",
-    [payload.sid, payload.sub]
+    "UPDATE sessions SET revoked_at = UTC_TIMESTAMP() WHERE refresh_token_hash = ?",
+    [hashToken(sessionToken)]
   );
 }
 
 async function requireAuth(req, res, next) {
   try {
-    req.user = await getUserFromAccessToken(getBearerToken(req));
+    req.user = await getUserFromSessionToken(getBearerToken(req));
     next();
   } catch (err) {
     res.status(401).json({message: 'Authentication required'});
@@ -533,23 +440,14 @@ app.post("/login", (req, res) => {
   );
 });
 
-app.post("/auth/refresh", async (req, res) => {
-  try {
-    const refreshToken = req.body && req.body.refreshToken;
-    const authSession = await rotateRefreshSession(refreshToken);
 
-    res.json({message: "Session refreshed", ...authSession});
-  } catch (err) {
-    res.status(401).json({message: "Session expired"});
-  }
-});
 
 app.post("/logout", async (req, res) => {
   try {
-    const refreshToken = req.body && req.body.refreshToken;
+    const sessionToken = getBearerToken(req) || (req.body && req.body.sessionToken);
 
-    if (refreshToken) {
-      await revokeRefreshSession(refreshToken);
+    if (sessionToken) {
+      await revokeAuthSession(sessionToken);
     }
 
     res.json({message: "Logged out"});
@@ -678,6 +576,85 @@ function parsePositiveInt(value, fallback) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function normalizeAttachmentName(name) {
+  const cleanedName = String(name || 'attachment')
+    .replace(/[\\/\0]/g, '')
+    .trim()
+    .slice(0, 255);
+
+  return cleanedName || 'attachment';
+}
+
+function normalizeAttachmentMime(name, mime) {
+  const normalizedMime = String(mime || '').trim().toLowerCase().split(';')[0];
+
+  if (allowedAttachmentMimeTypes.has(normalizedMime)) {
+    return normalizedMime === 'audio/mp3' ? 'audio/mpeg' : normalizedMime;
+  }
+
+  return attachmentMimeByExtension.get(path.extname(name).toLowerCase()) || null;
+}
+
+function normalizeAttachmentBuffer(data) {
+  if (Buffer.isBuffer(data)) {
+    return data;
+  }
+
+  if (data instanceof ArrayBuffer) {
+    return Buffer.from(data);
+  }
+
+  if (ArrayBuffer.isView(data)) {
+    return Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  }
+
+  return null;
+}
+
+function parseAttachmentPayload(attachment) {
+  if (!attachment) {
+    return {attachment: null};
+  }
+
+  const name = normalizeAttachmentName(attachment.name);
+  const mime = normalizeAttachmentMime(name, attachment.type || attachment.mime);
+  const data = normalizeAttachmentBuffer(attachment.data);
+
+  if (!mime) {
+    return {error: 'Only images, GIFs, MP4, and MP3 files are allowed'};
+  }
+
+  if (!data || data.length === 0) {
+    return {error: 'Attachment is empty'};
+  }
+
+  if (data.length > MAX_ATTACHMENT_BYTES) {
+    return {error: 'Attachment is too large'};
+  }
+
+  return {
+    attachment: {
+      name,
+      mime,
+      size: data.length,
+      data
+    }
+  };
+}
+
+function normalizeMessageAttachment(row) {
+  if (!row.attachment_data || !row.attachment_mime) {
+    return null;
+  }
+
+  return {
+    name: row.attachment_name || 'attachment',
+    type: row.attachment_mime,
+    size: Number(row.attachment_size) || row.attachment_data.length,
+    data: row.attachment_data.toString('base64')
+  };
+}
+
 function normalizeMessageRow(row) {
   return {
     id: row.id,
@@ -685,6 +662,7 @@ function normalizeMessageRow(row) {
     userId: row.user_id,
     username: row.username || 'anonymous',
     message: row.body,
+    attachment: normalizeMessageAttachment(row),
     createdAt: row.created_at,
     editedAt: row.edited_at
   };
@@ -728,7 +706,7 @@ function getDuplicateChannelName(channelList, baseName) {
 
 function loadChannelMessages(channelId, callback) {
   db.query(
-    "SELECT id, channel_id, user_id, username, body, created_at, edited_at FROM messages WHERE channel_id = ? ORDER BY id DESC LIMIT ?",
+    `SELECT ${MESSAGE_SELECT_COLUMNS} FROM messages WHERE channel_id = ? ORDER BY id DESC LIMIT ?`,
     [channelId, MESSAGE_HISTORY_LIMIT],
     (err, results) => {
       if (err) {
@@ -744,7 +722,7 @@ function loadChannelMessages(channelId, callback) {
 
 async function getMessageById(messageId) {
   const rows = await dbQuery(
-    "SELECT id, channel_id, user_id, username, body, created_at, edited_at FROM messages WHERE id = ? LIMIT 1",
+    `SELECT ${MESSAGE_SELECT_COLUMNS} FROM messages WHERE id = ? LIMIT 1`,
     [messageId]
   );
 
@@ -760,7 +738,7 @@ function sendSocketAuthError(socket, callback) {
 }
 
 function getSocketUser(socket, callback) {
-  if (!socket.user || socket.user.tokenExpiresAt <= Date.now()) {
+  if (!socket.user) {
     sendSocketAuthError(socket, callback);
     return null;
   }
@@ -768,10 +746,195 @@ function getSocketUser(socket, callback) {
   return socket.user;
 }
 
+function reply(callback, payload) {
+  if (typeof callback === 'function') {
+    callback(payload);
+  }
+}
+
+const channelKinds = {
+  text: {
+    table: 'channels',
+    list: () => channels,
+    find: getTextChannel,
+    reload: loadChannelCaches,
+    emit: emitTextChannels,
+    logName: '/channels',
+    invalidName: 'Invalid channel name',
+    notFound: 'Channel not found',
+    alreadyExists: 'Channel already exists',
+    createFailed: 'Could not create channel',
+    editFailed: 'Could not edit channel',
+    duplicateFailed: 'Could not duplicate channel',
+    deleteFailed: 'Could not delete channel',
+    keepOne: 'Keep at least one text channel',
+    beforeDelete: (channelId) => dbQuery("DELETE FROM messages WHERE channel_id = ?", [channelId]),
+    afterDelete: async () => {}
+  },
+  voice: {
+    table: 'voice_channels',
+    list: () => voiceChannels,
+    find: getVoiceChannel,
+    reload: async () => {
+      voiceChannels = await loadVoiceChannelsFromDb();
+    },
+    emit: emitVoiceChannels,
+    logName: '/voice_channels',
+    invalidName: 'Invalid voice channel name',
+    notFound: 'Voice channel not found',
+    alreadyExists: 'Voice channel already exists',
+    createFailed: 'Could not create voice channel',
+    editFailed: 'Could not edit voice channel',
+    duplicateFailed: 'Could not duplicate voice channel',
+    deleteFailed: 'Could not delete voice channel',
+    keepOne: 'Keep at least one voice channel',
+    beforeDelete: async () => {},
+    afterDelete: async (channelId) => removeVoiceChannelMembers(channelId)
+  }
+};
+
+async function createChannel(socket, kind, name, callback) {
+  if (!getSocketUser(socket, callback)) return;
+
+  const channelName = validateChannelName(name);
+
+  if (!channelName) {
+    reply(callback, {success: false, error: kind.invalidName});
+    return;
+  }
+
+  try {
+    const result = await dbQuery(
+      `INSERT INTO ${kind.table} (name, name_key) VALUES (?, ?)`,
+      [channelName, channelNameKey(channelName)]
+    );
+    await kind.reload();
+
+    const newChannel = kind.find(result.insertId) || {
+      id: result.insertId,
+      name: channelName
+    };
+
+    kind.emit();
+    reply(callback, {success: true, channel: newChannel});
+  } catch (err) {
+    reply(callback, {
+      success: false,
+      error: isDuplicateEntryError(err) ? kind.alreadyExists : kind.createFailed
+    });
+
+    if (!isDuplicateEntryError(err)) {
+      console.log(`${kind.logName} INSERT error:`, err);
+    }
+  }
+}
+
+async function editChannel(socket, kind, data, callback) {
+  if (!getSocketUser(socket, callback)) return;
+
+  const channelId = parsePositiveInt(data && data.channelId, 0);
+  const channelName = validateChannelName(data && data.name);
+
+  if (!kind.find(channelId)) {
+    reply(callback, {success: false, error: kind.notFound});
+    return;
+  }
+
+  if (!channelName) {
+    reply(callback, {success: false, error: kind.invalidName});
+    return;
+  }
+
+  try {
+    await dbQuery(
+      `UPDATE ${kind.table} SET name = ?, name_key = ? WHERE id = ?`,
+      [channelName, channelNameKey(channelName), channelId]
+    );
+    await kind.reload();
+    kind.emit();
+    reply(callback, {success: true, channel: kind.find(channelId)});
+  } catch (err) {
+    reply(callback, {
+      success: false,
+      error: isDuplicateEntryError(err) ? kind.alreadyExists : kind.editFailed
+    });
+
+    if (!isDuplicateEntryError(err)) {
+      console.log(`${kind.logName} UPDATE error:`, err);
+    }
+  }
+}
+
+async function duplicateChannel(socket, kind, data, callback) {
+  if (!getSocketUser(socket, callback)) return;
+
+  const channelId = parsePositiveInt(data && data.channelId, 0);
+  const sourceChannel = kind.find(channelId);
+
+  if (!sourceChannel) {
+    reply(callback, {success: false, error: kind.notFound});
+    return;
+  }
+
+  const channelName = getDuplicateChannelName(kind.list(), sourceChannel.name);
+
+  if (!channelName) {
+    reply(callback, {success: false, error: kind.duplicateFailed});
+    return;
+  }
+
+  try {
+    const result = await dbQuery(
+      `INSERT INTO ${kind.table} (name, name_key) VALUES (?, ?)`,
+      [channelName, channelNameKey(channelName)]
+    );
+    await kind.reload();
+
+    const newChannel = kind.find(result.insertId) || {
+      id: result.insertId,
+      name: channelName
+    };
+
+    kind.emit();
+    reply(callback, {success: true, channel: newChannel});
+  } catch (err) {
+    reply(callback, {success: false, error: kind.duplicateFailed});
+    console.log(`${kind.logName} duplicate error:`, err);
+  }
+}
+
+async function deleteChannel(socket, kind, data, callback) {
+  if (!getSocketUser(socket, callback)) return;
+
+  const channelId = parsePositiveInt(data && data.channelId, 0);
+
+  if (!kind.find(channelId)) {
+    reply(callback, {success: false, error: kind.notFound});
+    return;
+  }
+
+  if (kind.list().length <= 1) {
+    reply(callback, {success: false, error: kind.keepOne});
+    return;
+  }
+
+  try {
+    await kind.beforeDelete(channelId);
+    await dbQuery(`DELETE FROM ${kind.table} WHERE id = ?`, [channelId]);
+    await kind.afterDelete(channelId);
+    await kind.reload();
+    kind.emit();
+    reply(callback, {success: true});
+  } catch (err) {
+    reply(callback, {success: false, error: kind.deleteFailed});
+    console.log(`${kind.logName} DELETE error:`, err);
+  }
+}
+
 io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth && socket.handshake.auth.token;
-    socket.user = await getUserFromAccessToken(token);
+    socket.user = await getUserFromSessionToken(token);
     next();
   } catch (err) {
     next(new Error('Authentication required'));
@@ -785,150 +948,10 @@ io.on('connection', (socket) => {
     usersByChannel: getVoiceUsersByChannel()
   });
 
-  socket.on('create-channel', async (name, callback) => {
-    if (!getSocketUser(socket, callback)) return;
-
-    const channelName = validateChannelName(name);
-
-    if (!channelName) {
-      if (typeof callback === 'function') callback({success: false, error: 'Invalid channel name'});
-      return;
-    }
-
-    try {
-      const result = await dbQuery(
-        "INSERT INTO channels (name, name_key) VALUES (?, ?)",
-        [channelName, channelNameKey(channelName)]
-      );
-      await loadChannelCaches();
-
-      const newChannel = channels.find((channel) => channel.id === result.insertId) || {
-        id: result.insertId,
-        name: channelName
-      };
-
-      emitTextChannels();
-      if (typeof callback === 'function') callback({success: true, channel: newChannel});
-    } catch (err) {
-      if (typeof callback === 'function') {
-        callback({
-          success: false,
-          error: isDuplicateEntryError(err) ? 'Channel already exists' : 'Could not create channel'
-        });
-      }
-
-      if (!isDuplicateEntryError(err)) {
-        console.log("/channels INSERT error:", err);
-      }
-    }
-  });
-
-  socket.on('edit-channel', async (data, callback) => {
-    if (!getSocketUser(socket, callback)) return;
-
-    const channelId = parsePositiveInt(data && data.channelId, 0);
-    const channelName = validateChannelName(data && data.name);
-
-    if (!getTextChannel(channelId)) {
-      if (typeof callback === 'function') callback({success: false, error: 'Channel not found'});
-      return;
-    }
-
-    if (!channelName) {
-      if (typeof callback === 'function') callback({success: false, error: 'Invalid channel name'});
-      return;
-    }
-
-    try {
-      await dbQuery(
-        "UPDATE channels SET name = ?, name_key = ? WHERE id = ?",
-        [channelName, channelNameKey(channelName), channelId]
-      );
-      await loadChannelCaches();
-      emitTextChannels();
-
-      if (typeof callback === 'function') {
-        callback({success: true, channel: getTextChannel(channelId)});
-      }
-    } catch (err) {
-      if (typeof callback === 'function') {
-        callback({
-          success: false,
-          error: isDuplicateEntryError(err) ? 'Channel already exists' : 'Could not edit channel'
-        });
-      }
-
-      if (!isDuplicateEntryError(err)) {
-        console.log("/channels UPDATE error:", err);
-      }
-    }
-  });
-
-  socket.on('duplicate-channel', async (data, callback) => {
-    if (!getSocketUser(socket, callback)) return;
-
-    const channelId = parsePositiveInt(data && data.channelId, 0);
-    const sourceChannel = getTextChannel(channelId);
-
-    if (!sourceChannel) {
-      if (typeof callback === 'function') callback({success: false, error: 'Channel not found'});
-      return;
-    }
-
-    const channelName = getDuplicateChannelName(channels, sourceChannel.name);
-
-    if (!channelName) {
-      if (typeof callback === 'function') callback({success: false, error: 'Could not duplicate channel'});
-      return;
-    }
-
-    try {
-      const result = await dbQuery(
-        "INSERT INTO channels (name, name_key) VALUES (?, ?)",
-        [channelName, channelNameKey(channelName)]
-      );
-      await loadChannelCaches();
-
-      const newChannel = getTextChannel(result.insertId) || {
-        id: result.insertId,
-        name: channelName
-      };
-
-      emitTextChannels();
-      if (typeof callback === 'function') callback({success: true, channel: newChannel});
-    } catch (err) {
-      if (typeof callback === 'function') callback({success: false, error: 'Could not duplicate channel'});
-      console.log("/channels duplicate error:", err);
-    }
-  });
-
-  socket.on('delete-channel', async (data, callback) => {
-    if (!getSocketUser(socket, callback)) return;
-
-    const channelId = parsePositiveInt(data && data.channelId, 0);
-
-    if (!getTextChannel(channelId)) {
-      if (typeof callback === 'function') callback({success: false, error: 'Channel not found'});
-      return;
-    }
-
-    if (channels.length <= 1) {
-      if (typeof callback === 'function') callback({success: false, error: 'Keep at least one text channel'});
-      return;
-    }
-
-    try {
-      await dbQuery("DELETE FROM messages WHERE channel_id = ?", [channelId]);
-      await dbQuery("DELETE FROM channels WHERE id = ?", [channelId]);
-      await loadChannelCaches();
-      emitTextChannels();
-
-      if (typeof callback === 'function') callback({success: true});
-    } catch (err) {
-      if (typeof callback === 'function') callback({success: false, error: 'Could not delete channel'});
-      console.log("/channels DELETE error:", err);
-    }
-  });
+  socket.on('create-channel', (name, callback) => createChannel(socket, channelKinds.text, name, callback));
+  socket.on('edit-channel', (data, callback) => editChannel(socket, channelKinds.text, data, callback));
+  socket.on('duplicate-channel', (data, callback) => duplicateChannel(socket, channelKinds.text, data, callback));
+  socket.on('delete-channel', (data, callback) => deleteChannel(socket, channelKinds.text, data, callback));
 
   socket.on('load messages', (data, callback) => {
     if (!getSocketUser(socket, callback)) return;
@@ -968,12 +991,13 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('chat message', (data, callback) => {
+  socket.on('chat message', async (data, callback) => {
     const user = getSocketUser(socket, callback);
     if (!user) return;
 
     const channelId = parsePositiveInt(data && data.channelId, DEFAULT_CHANNEL_ID);
     const body = String((data && data.message) || '').trim();
+    const attachmentResult = parseAttachmentPayload(data && data.attachment);
 
     if (!getTextChannel(channelId)) {
       if (typeof callback === 'function') {
@@ -982,42 +1006,58 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (!body) {
+    if (attachmentResult.error) {
+      if (typeof callback === 'function') {
+        callback({success: false, error: attachmentResult.error});
+      }
+      return;
+    }
+
+    const attachment = attachmentResult.attachment;
+
+    if (!body && !attachment) {
       if (typeof callback === 'function') {
         callback({success: false, error: 'Message cannot be empty'});
       }
       return;
     }
 
-    db.query(
-      "INSERT INTO messages (channel_id, user_id, username, body) VALUES (?, ?, ?, ?)",
-      [channelId, user.id, user.username, body],
-      (err, result) => {
-        if (err) {
-          console.log("/messages INSERT error:", err);
-          if (typeof callback === 'function') {
-            callback({success: false, error: 'Message could not be saved'});
-          }
-          return;
-        }
-
-        const savedMessage = {
-          id: result.insertId,
+    try {
+      const result = await dbQuery(
+        `INSERT INTO messages (
+          channel_id,
+          user_id,
+          username,
+          body,
+          attachment_name,
+          attachment_mime,
+          attachment_size,
+          attachment_data
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
           channelId,
-          userId: user.id,
-          username: user.username,
-          message: body,
-          createdAt: new Date().toISOString(),
-          editedAt: null
-        };
+          user.id,
+          user.username,
+          body,
+          attachment && attachment.name,
+          attachment && attachment.mime,
+          attachment && attachment.size,
+          attachment && attachment.data
+        ]
+      );
 
-        io.emit('chat message', savedMessage);
+      const savedMessage = normalizeMessageRow(await getMessageById(result.insertId));
+      io.emit('chat message', savedMessage);
 
-        if (typeof callback === 'function') {
-          callback({success: true, message: savedMessage});
-        }
+      if (typeof callback === 'function') {
+        callback({success: true, message: savedMessage});
       }
-    );
+    } catch (err) {
+      console.log("/messages INSERT error:", err);
+      if (typeof callback === 'function') {
+        callback({success: false, error: 'Message could not be saved'});
+      }
+    }
   });
 
   socket.on('edit-message', async (data, callback) => {
@@ -1032,11 +1072,6 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (!body) {
-      if (typeof callback === 'function') callback({success: false, error: 'Message cannot be empty'});
-      return;
-    }
-
     try {
       const existingMessage = await getMessageById(messageId);
 
@@ -1047,6 +1082,11 @@ io.on('connection', (socket) => {
 
       if (String(existingMessage.user_id) !== String(user.id)) {
         if (typeof callback === 'function') callback({success: false, error: 'You can only edit your messages'});
+        return;
+      }
+
+      if (!body && !existingMessage.attachment_data) {
+        if (typeof callback === 'function') callback({success: false, error: 'Message cannot be empty'});
         return;
       }
 
@@ -1105,150 +1145,10 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('create-voice-channel', async (name, callback) => {
-    if (!getSocketUser(socket, callback)) return;
-
-    const channelName = validateChannelName(name);
-
-    if (!channelName) {
-      if (typeof callback === 'function') callback({success: false, error: 'Invalid voice channel name'});
-      return;
-    }
-
-    try {
-      const result = await dbQuery(
-        "INSERT INTO voice_channels (name, name_key) VALUES (?, ?)",
-        [channelName, channelNameKey(channelName)]
-      );
-      voiceChannels = await loadVoiceChannelsFromDb();
-
-      const newChannel = voiceChannels.find((channel) => channel.id === result.insertId) || {
-        id: result.insertId,
-        name: channelName
-      };
-
-      emitVoiceChannels();
-      if (typeof callback === 'function') callback({success: true, channel: newChannel});
-    } catch (err) {
-      if (typeof callback === 'function') {
-        callback({
-          success: false,
-          error: isDuplicateEntryError(err) ? 'Voice channel already exists' : 'Could not create voice channel'
-        });
-      }
-
-      if (!isDuplicateEntryError(err)) {
-        console.log("/voice_channels INSERT error:", err);
-      }
-    }
-  });
-
-  socket.on('edit-voice-channel', async (data, callback) => {
-    if (!getSocketUser(socket, callback)) return;
-
-    const channelId = parsePositiveInt(data && data.channelId, 0);
-    const channelName = validateChannelName(data && data.name);
-
-    if (!getVoiceChannel(channelId)) {
-      if (typeof callback === 'function') callback({success: false, error: 'Voice channel not found'});
-      return;
-    }
-
-    if (!channelName) {
-      if (typeof callback === 'function') callback({success: false, error: 'Invalid voice channel name'});
-      return;
-    }
-
-    try {
-      await dbQuery(
-        "UPDATE voice_channels SET name = ?, name_key = ? WHERE id = ?",
-        [channelName, channelNameKey(channelName), channelId]
-      );
-      voiceChannels = await loadVoiceChannelsFromDb();
-      emitVoiceChannels();
-
-      if (typeof callback === 'function') {
-        callback({success: true, channel: getVoiceChannel(channelId)});
-      }
-    } catch (err) {
-      if (typeof callback === 'function') {
-        callback({
-          success: false,
-          error: isDuplicateEntryError(err) ? 'Voice channel already exists' : 'Could not edit voice channel'
-        });
-      }
-
-      if (!isDuplicateEntryError(err)) {
-        console.log("/voice_channels UPDATE error:", err);
-      }
-    }
-  });
-
-  socket.on('duplicate-voice-channel', async (data, callback) => {
-    if (!getSocketUser(socket, callback)) return;
-
-    const channelId = parsePositiveInt(data && data.channelId, 0);
-    const sourceChannel = getVoiceChannel(channelId);
-
-    if (!sourceChannel) {
-      if (typeof callback === 'function') callback({success: false, error: 'Voice channel not found'});
-      return;
-    }
-
-    const channelName = getDuplicateChannelName(voiceChannels, sourceChannel.name);
-
-    if (!channelName) {
-      if (typeof callback === 'function') callback({success: false, error: 'Could not duplicate voice channel'});
-      return;
-    }
-
-    try {
-      const result = await dbQuery(
-        "INSERT INTO voice_channels (name, name_key) VALUES (?, ?)",
-        [channelName, channelNameKey(channelName)]
-      );
-      voiceChannels = await loadVoiceChannelsFromDb();
-
-      const newChannel = getVoiceChannel(result.insertId) || {
-        id: result.insertId,
-        name: channelName
-      };
-
-      emitVoiceChannels();
-      if (typeof callback === 'function') callback({success: true, channel: newChannel});
-    } catch (err) {
-      if (typeof callback === 'function') callback({success: false, error: 'Could not duplicate voice channel'});
-      console.log("/voice_channels duplicate error:", err);
-    }
-  });
-
-  socket.on('delete-voice-channel', async (data, callback) => {
-    if (!getSocketUser(socket, callback)) return;
-
-    const channelId = parsePositiveInt(data && data.channelId, 0);
-
-    if (!getVoiceChannel(channelId)) {
-      if (typeof callback === 'function') callback({success: false, error: 'Voice channel not found'});
-      return;
-    }
-
-    if (voiceChannels.length <= 1) {
-      if (typeof callback === 'function') callback({success: false, error: 'Keep at least one voice channel'});
-      return;
-    }
-
-    try {
-      await dbQuery("DELETE FROM voice_channels WHERE id = ?", [channelId]);
-      removeVoiceChannelMembers(channelId);
-      voiceChannels = await loadVoiceChannelsFromDb();
-      emitVoiceChannels();
-
-      if (typeof callback === 'function') callback({success: true});
-    } catch (err) {
-      if (typeof callback === 'function') callback({success: false, error: 'Could not delete voice channel'});
-      console.log("/voice_channels DELETE error:", err);
-    }
-  });
+  socket.on('create-voice-channel', (name, callback) => createChannel(socket, channelKinds.voice, name, callback));
+  socket.on('edit-voice-channel', (data, callback) => editChannel(socket, channelKinds.voice, data, callback));
+  socket.on('duplicate-voice-channel', (data, callback) => duplicateChannel(socket, channelKinds.voice, data, callback));
+  socket.on('delete-voice-channel', (data, callback) => deleteChannel(socket, channelKinds.voice, data, callback));
 
   socket.on('join-voice', (data, callback) => {
     const authUser = getSocketUser(socket, callback);

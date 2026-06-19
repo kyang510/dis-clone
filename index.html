@@ -4,19 +4,22 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:3000 ws://localhost:3000; media-src 'self' blob:"
-      id="info"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:3000 ws://localhost:3000; img-src 'self' data: blob:; media-src 'self' data: blob:"
     />
     <title>discord clone</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
 
   <body>
+<div class="left-sidebar">
     <div class="directory">
 
       <img class = logo src ="logo.png">
 
     </div>
+    <!-- background behind voice controls -->
+    <div class="directory-1"></div>
+    <div class="channel-list-1"></div>
 
 <div class = "channel-list">
       <div class = "channel-header">
@@ -39,6 +42,21 @@
         <div id="dynamic-voice-channels"></div>
       </div>
     </div>
+
+          <!-- voice control panel -->
+      <div id="voice-control-panel" class="voice-control-panel">
+        <div>
+          <div class="voice-status-label">Voice disconnected</div>
+          <div id="voice-status-channel" class="voice-status-channel">Not connected</div>
+        </div>
+        <div class="voice-actions">
+          <button id="mute-voice-btn" type="button" disabled>Mute</button>
+          <button id="deafen-voice-btn" type="button" disabled>Deafen</button>
+          <button id="leave-voice-btn" type="button" disabled>Leave</button>
+          <button id="voice-settings-btn" type="button">Settings</button>
+        </div>
+      </div>
+  </div>
 
     <!-- Create Channel -->
     <div id="channel-modal" class="modal" style="display: none;">
@@ -86,23 +104,15 @@
       <div id="messageArea" class="messages"></div>
 
       <form id="form" class="input-area">
-        <input type="text" id="message" placeholder="Message" />
+        <button type="button" id="upload-btn" class="upload-btn" title="Attach file">+</button>
+        <input type="file" id="media-upload" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,audio/mpeg,audio/mp3,.jpg,.jpeg,.png,.webp,.gif,.mp4,.mp3" hidden />
+        <div id="selected-attachment" class="selected-attachment" hidden>
+          <span id="selected-attachment-name"></span>
+          <button type="button" id="clear-attachment" title="Remove attachment">x</button>
+        </div>
+        <input type="text" id="message" placeholder = "Message" />
       </form>
     </div>
-
-          <!-- voice control panel -->
-      <div id="voice-control-panel" class="voice-control-panel">
-        <div>
-          <div class="voice-status-label">Voice disconnected</div>
-          <div id="voice-status-channel" class="voice-status-channel">Not connected</div>
-        </div>
-        <div class="voice-actions">
-          <button id="mute-voice-btn" type="button" disabled>Mute</button>
-          <button id="deafen-voice-btn" type="button" disabled>Deafen</button>
-          <button id="leave-voice-btn" type="button" disabled>Leave</button>
-          <button id="voice-settings-btn" type="button">Settings</button>
-        </div>
-      </div>
 
     <!-- Voice Settings -->
     <div id="voice-settings-modal" class="modal" style="display: none;">
